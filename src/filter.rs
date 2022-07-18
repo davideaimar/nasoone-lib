@@ -25,12 +25,12 @@ impl Filter {
         };
     }
     pub fn is_port_allowed(&self, port: u8) -> bool {
-        self.ports.contains(&port)
+        self.ports.len()==0 || self.ports.contains(&port)
     }
     pub fn is_ip_allowed(&self, ip: IpAddr) -> bool {
         match ip {
-            IpAddr::V4(ip) => self.ipv4.contains(&ip),
-            IpAddr::V6(ip) => self.ipv6.contains(&ip),
+            IpAddr::V4(ip) => self.ipv4.len()==0 || self.ipv4.contains(&ip),
+            IpAddr::V6(ip) => self.ipv6.len()==0 || self.ipv6.contains(&ip),
         }
     }
 }

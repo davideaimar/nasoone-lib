@@ -1,68 +1,72 @@
 //! Nasoone-lib is a library for the NASOONE project.
-//! It provides a struct for analyzing network data using [pcap](https://docs.rs/pcap/latest/pcap/index.html).
+//! It provides a struct for analyzing network traffic using [pcap](https://docs.rs/pcap/latest/pcap/index.html).
 
 mod filter;
 
-use std::marker::PhantomData;
+use pcap::{Active, Capture, Device};
 use crate::filter::Filter;
 
-pub struct Initial{}
-pub struct Running{}
-pub struct Paused{}
-pub struct Stopped{}
+enum NasooneState {
+    Initial,
+    Running,
+    Paused,
+    Stopped,
+}
 
-pub struct Nasoone<State> {
-    state: PhantomData<State>,
+pub struct Nasoone {
+    state: NasooneState,
     filter: Option<Filter>,
+    timeout: u64,
+    capture: Capture<Active>,
+    output: String,
 }
 
-impl<Src> Nasoone<Src> {
-    fn transition<Dest>(self) -> Nasoone<Dest> {
-        let Nasoone { filter, state: _} = self;
-        Nasoone { filter, state: PhantomData }
-    }
-}
-
-impl Nasoone<Initial> {
-    pub fn from_file(_path: &str) -> Result<Nasoone<Initial>, ()> {
-        Ok(Nasoone { state: PhantomData, filter: None })
-    }
-    pub fn from_device(_device: &str) -> Result<Nasoone<Initial>, ()> {
-        Ok(Nasoone { state: PhantomData, filter: None })
+impl Nasoone {
+    fn from_device(device: &str, timeout: u64, dest_file: &str) -> Result<Nasoone, String> {
+        let capture = Capture::from_device(device)
+            .map_err(|e| format!("{}", e))?;
+        let capture = capture
+            .promisc(true)
+            .immediate_mode(true)
+            .open()
+            .map_err(|e| format!("{}", e))?;
+        Ok(Nasoone {
+            state: NasooneState::Initial,
+            filter: None,
+            timeout,
+            capture,
+            output: dest_file.to_string(),
+        })
     }
     pub fn set_filter(&mut self, filter: Filter) {
         self.filter = Some(filter);
     }
-    pub fn start(self) -> Result<Nasoone<Running>, ()> {
-        // TODO: implement start
-        Ok(self.transition())
+    pub fn start(&mut self) -> Result<(), String> {
+        match self.state {
+            NasooneState::Initial => {
+                self.state = NasooneState::Running;
+                let mut cnt = 0;
+                while let Ok(_packet) = self.capture.next() {
+                    cnt += 1;
+                    if cnt > 1_000 {
+                        break;
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(format!("Nasoone is already running"))?,
+        }
+    }
+    pub fn list_devices() -> Result<Vec<String>, String> {
+        let devices = Device::list().map_err(|e| format!("{}", e))?;
+        let mut device_names = Vec::new();
+        for device in devices {
+            device_names.push(device.name.to_string());
+        }
+        Ok(device_names)
     }
 }
 
-impl Nasoone<Running> {
-    pub fn pause(self) -> Result<Nasoone<Paused>, ()> {
-        // TODO: implement pause
-        Ok(self.transition())
-    }
-}
-
-impl Nasoone<Paused> {
-    pub fn stop(self) -> Result<Nasoone<Stopped>, ()> {
-        // TODO: implement stop
-        Ok(self.transition())
-    }
-    pub fn resume(self) -> Result<Nasoone<Running>, ()> {
-        // TODO: implement resume
-        Ok(self.transition())
-    }
-}
-
-impl Nasoone<Stopped> {
-    pub fn reset(self) -> Result<Nasoone<Initial>, ()> {
-        // TODO: implement capture reset
-        Ok(self.transition())
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -71,16 +75,17 @@ mod tests {
 
     #[test]
     fn it_compiles() {
-        let mut naso = Nasoone::from_device("en0").unwrap();
+        let mut naso = Nasoone::from_device(
+            "en0",
+            10,
+            "./tmp/output.pcap"
+        ).unwrap();
         let mut filter = Filter::new();
+        filter.add_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)));
+        filter.add_ip(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)));
         filter.add_port(80);
-        filter.add_ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
-        filter.add_ip(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)));
         naso.set_filter(filter);
-        let naso = naso.start().unwrap();
-        let naso = naso.pause().unwrap();
-        let naso = naso.resume().unwrap();
-        let naso = naso.pause().unwrap();
-        naso.stop().unwrap();
+        naso.start().unwrap();
+        println!("{:?}", Nasoone::list_devices().unwrap());
     }
 }
