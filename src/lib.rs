@@ -3,11 +3,11 @@
 
 pub mod filter;
 
+use crate::filter::Filter;
+use pcap::{Active, Capture, Device, Offline};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs::File;
-use crate::filter::Filter;
-use pcap::{Active, Capture, Device, Offline};
 use std::path::Path;
 
 enum NasooneState {
@@ -31,7 +31,7 @@ pub enum NasooneError {
     UnsetCapture,
 }
 
-impl Display for NasooneError{
+impl Display for NasooneError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             NasooneError::PcapError(e) => write!(f, "Pcap error: {}", e),

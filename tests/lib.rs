@@ -1,6 +1,6 @@
-use std::fs::remove_file;
 use nasoone_lib::filter::Filter;
-use nasoone_lib::{Nasoone};
+use nasoone_lib::Nasoone;
+use std::fs::remove_file;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 #[test]
@@ -22,7 +22,10 @@ fn output_paths() {
     naso.set_capture_file("./tests/data/http.pcap").unwrap();
 
     // should fail because ./not/an/existing/dir/ doesn't exist
-    assert_eq!(naso.set_output("./not/an/existing/dir/output.txt").is_err(), true);
+    assert_eq!(
+        naso.set_output("./not/an/existing/dir/output.txt").is_err(),
+        true
+    );
     // should fail because ./tests/data/http.pcap already exists
     assert_eq!(naso.set_output("./tests/data/http.pcap").is_err(), true);
     // should succeed because ./tests/data/ exists but output.txt doesn't exist
@@ -57,14 +60,19 @@ fn filters() {
     filter.add_ip(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)));
     filter.add_port(80);
 
-
     // these should be allowed
     assert!(filter.is_ip_allowed(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
     assert!(filter.is_ip_allowed(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1))));
     assert!(filter.is_port_allowed(80));
 
     // these should be denied
-    assert_eq!(filter.is_ip_allowed(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2))), false);
-    assert_eq!(filter.is_ip_allowed(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2))), false);
+    assert_eq!(
+        filter.is_ip_allowed(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2))),
+        false
+    );
+    assert_eq!(
+        filter.is_ip_allowed(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2))),
+        false
+    );
     assert_eq!(filter.is_port_allowed(8080), false);
 }
