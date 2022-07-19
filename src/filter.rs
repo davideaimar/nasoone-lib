@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub struct Filter {
-    ports: HashSet<u8>,
+    ports: HashSet<u16>,
     ipv4: HashSet<Ipv4Addr>,
     ipv6: HashSet<Ipv6Addr>,
 }
@@ -15,7 +15,7 @@ impl Filter {
             ipv6: HashSet::new(),
         }
     }
-    pub fn add_port(&mut self, port: u8) {
+    pub fn add_port(&mut self, port: u16) {
         self.ports.insert(port);
     }
     pub fn add_ip(&mut self, ip: IpAddr) {
@@ -24,7 +24,7 @@ impl Filter {
             IpAddr::V6(ip) => self.ipv6.insert(ip),
         };
     }
-    pub fn is_port_allowed(&self, port: u8) -> bool {
+    pub fn is_port_allowed(&self, port: u16) -> bool {
         self.ports.is_empty() || self.ports.contains(&port)
     }
     pub fn is_ip_allowed(&self, ip: IpAddr) -> bool {
