@@ -24,6 +24,28 @@ enum NasooneCapture {
 }
 
 #[derive(Debug)]
+pub struct NetworkInterface {
+    name: String,
+    desc: Option<String>
+}
+
+impl Display for NetworkInterface {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let name = self.desc.clone().unwrap_or(self.name.clone());
+        write!(f, "{}", name)
+    }
+}
+
+impl NetworkInterface {
+    fn new(name: String, desc: Option<String>) -> NetworkInterface {
+        NetworkInterface {
+            name,
+            desc
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum NasooneError {
     PcapError(pcap::Error),
     InvalidState(String),
@@ -169,11 +191,15 @@ impl Nasoone {
             )),
         }
     }
-    pub fn list_devices() -> Result<Vec<String>, NasooneError> {
+    pub fn list_devices() -> Result<Vec<NetworkInterface>, NasooneError> {
         let devices = Device::list().map_err(NasooneError::PcapError)?;
         let mut device_names = Vec::new();
         for device in devices {
-            device_names.push(device.name.to_string());
+            let interface = NetworkInterface::new(
+                device.name.to_string(),
+                device.desc,
+            );
+            device_names.push(interface);
         }
         Ok(device_names)
     }

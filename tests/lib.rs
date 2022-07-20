@@ -42,8 +42,11 @@ fn output_paths() {
 
 #[test]
 fn list_devices() {
-    assert_eq!(Nasoone::list_devices().is_err(), false);
-    assert!(Nasoone::list_devices().unwrap().len() > 0);
+    let devices = Nasoone::list_devices();
+    assert_eq!(devices.is_err(), false);
+    let devices = devices.unwrap();
+    assert!(devices.len() > 0);
+    println!("{:?}", devices);
 }
 
 #[test]
