@@ -13,7 +13,7 @@ fn it_compiles() {
     naso.set_filter(filter).unwrap();
     naso.set_capture_file("./tests/data/http.pcap").unwrap();
     naso.start().unwrap();
-    assert_eq!(Nasoone::list_devices().is_err(), false);
+    assert!(Nasoone::list_devices().is_ok());
 }
 
 #[test]
@@ -22,14 +22,11 @@ fn output_paths() {
     naso.set_capture_file("./tests/data/http.pcap").unwrap();
 
     // should fail because ./not/an/existing/dir/ doesn't exist
-    assert_eq!(
-        naso.set_output("./not/an/existing/dir/output.txt").is_err(),
-        true
-    );
+    assert!(naso.set_output("./not/an/existing/dir/output.txt").is_err());
     // should fail because ./tests/data/http.pcap already exists
-    assert_eq!(naso.set_output("./tests/data/http.pcap").is_err(), true);
+    assert!(naso.set_output("./tests/data/http.pcap").is_err());
     // should succeed because ./tests/data/ exists but output.txt doesn't exist
-    assert_eq!(naso.set_output("./tests/data/output.txt").is_err(), false);
+    assert!(naso.set_output("./tests/data/output.txt").is_ok());
 
     // remove output.txt
     remove_file("./tests/data/output.txt").unwrap();
@@ -37,15 +34,15 @@ fn output_paths() {
     naso.start().unwrap();
 
     // should fail because capture has already been started
-    assert_eq!(naso.set_output("./tests/data/output.txt").is_err(), true);
+    assert!(naso.set_output("./tests/data/output.txt").is_err());
 }
 
 #[test]
 fn list_devices() {
     let devices = Nasoone::list_devices();
-    assert_eq!(devices.is_err(), false);
+    assert!(devices.is_ok());
     let devices = devices.unwrap();
-    assert!(devices.len() > 0);
+    assert!(!devices.is_empty());
     println!("{:?}", devices);
 }
 
@@ -69,13 +66,7 @@ fn filters() {
     assert!(filter.is_port_allowed(80));
 
     // these should be denied
-    assert_eq!(
-        filter.is_ip_allowed(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2))),
-        false
-    );
-    assert_eq!(
-        filter.is_ip_allowed(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2))),
-        false
-    );
-    assert_eq!(filter.is_port_allowed(8080), false);
+    assert!(!filter.is_ip_allowed(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2))));
+    assert!(!filter.is_ip_allowed(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2))));
+    assert!(!filter.is_port_allowed(8080));
 }

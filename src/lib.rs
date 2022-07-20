@@ -26,22 +26,19 @@ enum NasooneCapture {
 #[derive(Debug)]
 pub struct NetworkInterface {
     name: String,
-    desc: Option<String>
+    desc: Option<String>,
 }
 
 impl Display for NetworkInterface {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        let name = self.desc.clone().unwrap_or(self.name.clone());
+        let name = self.desc.clone().unwrap_or_else(|| self.name.clone());
         write!(f, "{}", name)
     }
 }
 
 impl NetworkInterface {
     fn new(name: String, desc: Option<String>) -> NetworkInterface {
-        NetworkInterface {
-            name,
-            desc
-        }
+        NetworkInterface { name, desc }
     }
 }
 
@@ -195,10 +192,7 @@ impl Nasoone {
         let devices = Device::list().map_err(NasooneError::PcapError)?;
         let mut device_names = Vec::new();
         for device in devices {
-            let interface = NetworkInterface::new(
-                device.name.to_string(),
-                device.desc,
-            );
+            let interface = NetworkInterface::new(device.name.to_string(), device.desc);
             device_names.push(interface);
         }
         Ok(device_names)
