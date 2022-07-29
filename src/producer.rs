@@ -1,10 +1,11 @@
-use crate::{NasooneCapture, NasooneCommand, PacketData};
-use crossbeam_channel::{Receiver, Sender};
+use crate::{NasooneCapture, NasooneState, PacketData};
+use crossbeam_channel::Sender;
+use std::sync::{Arc, Condvar, Mutex};
 
 pub(crate) fn producer_task(
     mut capture: NasooneCapture,
     tx_prod_parser: Sender<PacketData>,
-    rx_main_prod: Receiver<NasooneCommand>,
+    state: Arc<(Condvar, Mutex<NasooneState>)>,
 ) -> usize {
     let mut cnt: usize = 0;
     while let Ok(packet) = capture.next() {
@@ -14,6 +15,7 @@ pub(crate) fn producer_task(
             packet.header.ts.tv_sec as u64 * 1000 + packet.header.ts.tv_usec as u64 / 1000;
         let data = packet.data.to_vec();
         let bytes = packet.header.caplen;
+        // send packet to parsers
         tx_prod_parser
             .send(PacketData {
                 timestamp,
@@ -21,20 +23,25 @@ pub(crate) fn producer_task(
                 bytes,
             })
             .unwrap();
-        let command = rx_main_prod.try_recv();
-        match command {
-            Ok(NasooneCommand::Stop) => {
+        // check if the state is changed
+        let mutex = state.1.lock().unwrap();
+        match *mutex {
+            NasooneState::Stopped => {
                 break;
             }
-            Ok(NasooneCommand::Pause) => loop {
-                match rx_main_prod.recv() {
-                    Ok(NasooneCommand::Resume) => break,
-                    Ok(NasooneCommand::Stop) => break,
-                    _ => {}
+            NasooneState::Paused => {
+                let state = state
+                    .0
+                    .wait_while(mutex, |state| *state == NasooneState::Paused)
+                    .unwrap();
+                if *state == NasooneState::Stopped {
+                    break;
                 }
-            },
+            }
             _ => {}
-        };
+        }
     }
+    *state.1.lock().unwrap() = NasooneState::Stopped;
+    println!("producer_task: {} packets processed", cnt);
     cnt
 }
