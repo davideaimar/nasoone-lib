@@ -8,7 +8,8 @@ mod writer;
 use crate::parser::parser_task;
 use crate::producer::producer_task;
 use crate::writer::writer_task;
-use pcap::{Active, Capture, Device, Offline};
+use pcap::{Active, Capture, Device, Offline, Packet};
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs::File;
@@ -109,11 +110,54 @@ pub struct Nasoone {
     output: Option<File>,
 }
 
-struct PacketData {
+#[derive(Clone)]
+pub struct PacketData {
     timestamp: u64,
     data: Vec<u8>,
     bytes: u32,
 }
+
+impl PacketData {
+    pub fn new(timestamp: u64, data: Vec<u8>, bytes: u32) -> Self {
+        PacketData { timestamp, data, bytes }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct PacketKey {
+    ip: String,
+    port: usize,
+}
+
+impl PacketKey {
+    pub fn new(ip: String, port: usize) -> Self {
+        PacketKey { ip, port }
+    }
+}
+
+// A struct for sending messages from parsers to writer
+#[derive(Clone)]
+pub struct Collection {
+    packets: HashMap<PacketKey, PacketData>
+}
+
+impl Collection {
+    pub fn new() -> Self {
+        Collection { packets: HashMap::<PacketKey, PacketData>::new() }
+    }
+
+    pub fn insert(&mut self, key: PacketKey, value: PacketData) {
+        self.packets.insert(key, value);
+    }
+
+    pub fn get(&self, ip: String, port: usize) -> PacketData {
+        let ret = self.packets.get(&PacketKey::new(ip, port)).unwrap().clone();
+        return ret;
+    }
+}
+
+// Need to implement Display for PAcketKey and PacketData
+
 
 impl Nasoone {
     pub fn new() -> Self {
@@ -238,7 +282,8 @@ impl Nasoone {
                 }
 
                 let (tx_prod_parser, rx_prod_parser) = crossbeam_channel::unbounded();
-
+                let (tx_parser_writer, rx_parser_writer) = crossbeam_channel::unbounded();
+                
                 let capture = self.capture.take().unwrap();
                 let state_c = self.state.clone();
                 thread::spawn(move || producer_task(capture, tx_prod_parser, state_c));
@@ -247,12 +292,14 @@ impl Nasoone {
 
                 for _ in 0..num_cpus {
                     let rx_prod_parser = rx_prod_parser.clone();
+                    let tx_parser_writer = tx_parser_writer.clone();
                     let timeout = self.timeout;
-                    thread::spawn(move || parser_task(rx_prod_parser, timeout));
+                    thread::spawn(move || parser_task(rx_prod_parser, tx_parser_writer, timeout));
                 }
 
-                let output = self.output.take().unwrap();
-                thread::spawn(move || writer_task(output));
+                let mut output = self.output.take().unwrap();
+                let rx_parser_writer = rx_parser_writer.clone();
+                thread::spawn(move || writer_task(rx_parser_writer, &mut output));
 
                 *state = NasooneState::Running;
                 Ok(())

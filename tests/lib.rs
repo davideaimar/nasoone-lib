@@ -85,3 +85,14 @@ fn test_pause_stop() {
     let _ = naso.stop();
     let _ = remove_file("./tests/output/test4");
 }
+
+#[test]
+fn test_send_message() {
+    let mut naso = Nasoone::new();
+    naso.set_capture_file("./tests/data/http.pcap").unwrap();
+    naso.set_output("./tests/output/test5").unwrap();
+    naso.start().unwrap();
+    println!("Started");
+    let _ = naso.stop();
+    //remove_file("./tests/output/test5").unwrap();
+}
