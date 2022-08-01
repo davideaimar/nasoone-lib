@@ -66,6 +66,10 @@ impl Display for NetworkInterface {
 impl NetworkInterface {
     fn new(name: String, desc: Option<String>) -> NetworkInterface {
         NetworkInterface { name, desc }
+    } 
+
+    pub fn get_name(&self) -> String {
+        self.name.clone()
     }
 }
 
@@ -98,19 +102,50 @@ impl Display for NasooneError {
 
 impl Error for NasooneError {}
 
-/// A struct for capturing network traffic.
-pub struct Nasoone {
-    /// The state of the capture.
-    state: Arc<(Condvar, Mutex<NasooneState>)>,
-    /// The periodical timeout after which the output file is updated.
-    timeout: u32,
-    /// The pcap capture.
-    capture: Option<NasooneCapture>,
-    /// The path to the output file.
-    output: Option<File>,
+/* Data structures for packets' hashmap */
+/* PacketKey is the key of the hashmap */
+/* PacketData is the value of the hashmap */
+
+// Struct PacketKey
+#[derive(Hash)]
+pub struct PacketKey {
+    ip: String,
+    port: usize,
 }
 
-#[derive(Clone)]
+impl PacketKey {
+    pub fn new(ip: String, port: usize) -> Self {
+        PacketKey { ip, port }
+    }
+}
+
+impl Clone for PacketKey {
+    fn clone(&self) -> Self {
+        PacketKey { ip: self.ip.clone(), port: self.port.clone() }
+    }
+}
+
+impl Display for PacketKey {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let ip = self.ip.clone();
+        let port = self.port.clone().to_string();
+        write!(f, "IP address: {}, port: {}", ip, port)
+    }
+}
+
+impl PartialEq for PacketKey {
+    fn eq(&self, other: &Self) -> bool {
+        match (self.ip.clone(), self.port) {
+            (x, y) if x == other.ip && y == other.port => return true,
+            _ => return false,
+        }
+    }
+}
+
+impl Eq for PacketKey { }
+
+
+// Struct PacketData
 pub struct PacketData {
     timestamp: u64,
     data: Vec<u8>,
@@ -123,20 +158,41 @@ impl PacketData {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct PacketKey {
-    ip: String,
-    port: usize,
-}
-
-impl PacketKey {
-    pub fn new(ip: String, port: usize) -> Self {
-        PacketKey { ip, port }
+impl Clone for PacketData {
+    fn clone(&self) -> Self {
+        PacketData { timestamp: self.timestamp.clone(), data: self.data.clone(), bytes: self.bytes.clone() }
     }
 }
 
+
+impl Display for PacketData {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let timestamp = self.timestamp.clone().to_string();
+        let data = self.data.clone();
+        let bytes = self.bytes.clone().to_string();
+        write!(f, "timestamp: {}, data: {:?}, bytes: {}", timestamp, data, bytes)
+    }
+}
+
+impl PartialEq for PacketData {
+    fn eq(&self, other: &Self) -> bool {
+        let mut flag = true;
+        if self.timestamp == other.timestamp && self.bytes == other.bytes {
+            for i in 0..self.data.len() {
+                if self.data[i] != other.data[i] {
+                    flag = false;
+                    break;
+                }
+            }
+        }
+        flag
+    }
+}
+
+
 // A struct for sending messages from parsers to writer
-#[derive(Clone)]
+// This is the hashmap
+
 pub struct Collection {
     packets: HashMap<PacketKey, PacketData>
 }
@@ -150,14 +206,29 @@ impl Collection {
         self.packets.insert(key, value);
     }
 
-    pub fn get(&self, ip: String, port: usize) -> PacketData {
-        let ret = self.packets.get(&PacketKey::new(ip, port)).unwrap().clone();
+    pub fn get(&self, pk: &PacketKey) -> PacketData {
+        let ret = self.packets.get(pk).unwrap().clone();
         return ret;
     }
 }
 
-// Need to implement Display for PAcketKey and PacketData
+impl Clone for Collection {
+    fn clone(&self) -> Self {
+        Collection { packets: self.packets.clone() }
+    }
+}
 
+/// A struct for capturing network traffic.
+pub struct Nasoone {
+    /// The state of the capture.
+    state: Arc<(Condvar, Mutex<NasooneState>)>,
+    /// The periodical timeout after which the output file is updated.
+    timeout: u32,
+    /// The pcap capture.
+    capture: Option<NasooneCapture>,
+    /// The path to the output file.
+    output: Option<File>,
+}
 
 impl Nasoone {
     pub fn new() -> Self {

@@ -1,4 +1,4 @@
-use nasoone_lib::{Nasoone, NasooneError};
+use nasoone_lib::{Nasoone, NasooneError, NetworkInterface};
 use std::fs::remove_file;
 use std::thread::sleep;
 use std::time::Duration;
@@ -87,12 +87,46 @@ fn test_pause_stop() {
 }
 
 #[test]
-fn test_send_message() {
+fn test_send_collection() {
     let mut naso = Nasoone::new();
-    naso.set_capture_file("./tests/data/http.pcap").unwrap();
+    //println!("{:?}", Nasoone::list_devices().unwrap());
+    naso.set_capture_device(Nasoone::list_devices().unwrap()[0].get_name().as_str()).unwrap();
     naso.set_output("./tests/output/test5").unwrap();
     naso.start().unwrap();
     println!("Started");
     let _ = naso.stop();
     //remove_file("./tests/output/test5").unwrap();
+}
+
+#[test]
+fn test_send_collection_with_pause() {
+    let mut naso = Nasoone::new();
+    naso.set_capture_device(Nasoone::list_devices().unwrap()[0].get_name().as_str()).unwrap();
+    naso.set_output("./tests/output/test6").unwrap();
+    naso.start().unwrap();
+    println!("Started");
+    // try to pause, could fail because the capture has already finished
+    let res = naso.pause();
+    if res.is_ok() {
+        println!("Paused");
+    } else {
+        match res.err().unwrap() {
+            NasooneError::InvalidState(_) => {
+                println!("Capture already finished");
+                remove_file("./tests/output/test6").unwrap();
+                return;
+            }
+            _ => panic!("Unexpected error"),
+        }
+    }
+    // wait 0.3 second in paused state
+    sleep(Duration::from_millis(300));
+    // resume the capture
+    naso.resume().unwrap();
+    println!("Resumed");
+    // wait 2 second in running state
+    sleep(Duration::from_millis(2000));
+    // stop the capture, could fail because the capture has already finished
+    let _ = naso.stop();
+    let _ = remove_file("./tests/output/test6");
 }
