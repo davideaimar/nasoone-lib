@@ -8,7 +8,7 @@ fn it_compiles() {
     let mut naso = Nasoone::new();
     naso.set_capture_file("./tests/data/http.pcap").unwrap();
     naso.set_output("./tests/output/test1").unwrap();
-    naso.set_filter("ip host 192.168.1.1").unwrap();
+    //naso.set_filter("ip host 192.168.1.1").unwrap();
     naso.start().unwrap();
     assert!(Nasoone::list_devices().is_ok());
     remove_file("./tests/output/test1").unwrap();
@@ -56,7 +56,8 @@ fn filters() {
 #[test]
 fn test_pause_stop() {
     let mut naso = Nasoone::new();
-    naso.set_capture_file("./tests/data/http.pcap").unwrap();
+    //naso.set_capture_file("./tests/data/http.pcap").unwrap();
+    naso.set_capture_device("en0").unwrap();
     naso.set_output("./tests/output/test4").unwrap();
     naso.start().unwrap();
     println!("Started");
@@ -84,4 +85,14 @@ fn test_pause_stop() {
     // stop the capture, could fail because the capture has already finished
     let _ = naso.stop();
     let _ = remove_file("./tests/output/test4");
+}
+
+#[test]
+fn test_capture() {
+    let mut naso = Nasoone::new();
+    //naso.set_capture_file("./tests/data/http.pcap").unwrap();
+    naso.set_capture_device("en0").unwrap();
+    naso.set_output("./tests/output/test4").unwrap();
+    naso.start().unwrap();
+    sleep(Duration::from_secs(5));
 }

@@ -9,12 +9,34 @@ use crate::parser::parser_task;
 use crate::producer::producer_task;
 use crate::writer::writer_task;
 use pcap::{Active, Capture, Device, Offline};
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs::File;
+use std::net::IpAddr;
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
+
+#[derive(Hash, Eq, PartialEq, Debug)]
+enum AddressType {
+    Src,
+    Dest,
+}
+
+#[derive(Hash, Eq, PartialEq, Debug)]
+struct ReportKey {
+    ip: IpAddr,
+    port: u16,
+    dir: AddressType,
+}
+#[derive(Debug)]
+struct ReportValue {
+    first_timestamp_ms: u64,
+    last_timestamp_ms: u64,
+    bytes: u64,
+    protocols: HashSet<u8>,
+}
 
 #[derive(PartialEq, Debug)]
 /// Represents in which state the capture is.
@@ -110,7 +132,7 @@ pub struct Nasoone {
 }
 
 struct PacketData {
-    timestamp: u64,
+    timestamp_ms: u64,
     data: Vec<u8>,
     bytes: u32,
 }
