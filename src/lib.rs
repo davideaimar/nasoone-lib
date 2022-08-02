@@ -24,18 +24,56 @@ enum AddressType {
     Dest,
 }
 
+impl Display for AddressType {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        match self {
+            AddressType::Src => write!(f, "src"),
+            AddressType::Dest => write!(f, "dest"),
+        }
+    }
+}
+
 #[derive(Hash, Eq, PartialEq, Debug)]
 struct ReportKey {
     ip: IpAddr,
     port: u16,
     dir: AddressType,
 }
+
+impl Display for ReportKey {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let ip = self.ip;
+        let port = self.port.clone().to_string();
+        write!(f, "{}, {}, {}", ip, port, self.dir)
+    }
+}
+
 #[derive(Debug)]
 struct ReportValue {
     first_timestamp_ms: u64,
     last_timestamp_ms: u64,
     bytes: u64,
     protocols: HashSet<u8>,
+}
+
+impl Display for ReportValue {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let protocols = self
+            .protocols
+            .iter()
+            .map(|p| match p {
+                6 => "TCP",
+                17 => "UDP",
+                _ => "",
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        write!(
+            f,
+            "[{}], {}, {}, {}",
+            protocols, self.first_timestamp_ms, self.last_timestamp_ms, self.bytes
+        )
+    }
 }
 
 #[derive(PartialEq, Debug)]
@@ -88,6 +126,10 @@ impl NetworkInterface {
     fn new(name: String, desc: Option<String>) -> NetworkInterface {
         NetworkInterface { name, desc }
     }
+
+    pub fn get_name(&self) -> String {
+        self.name.clone()
+    }
 }
 
 #[derive(Debug)]
@@ -119,6 +161,14 @@ impl Display for NasooneError {
 
 impl Error for NasooneError {}
 
+// Struct PacketData
+#[derive(Clone, Eq, PartialEq)]
+struct PacketData {
+    timestamp_ms: u64,
+    data: Vec<u8>,
+    bytes: u32,
+}
+
 /// A struct for capturing network traffic.
 pub struct Nasoone {
     /// The state of the capture.
@@ -135,12 +185,6 @@ pub struct Nasoone {
     parser_handles: Vec<thread::JoinHandle<()>>,
     /// Writer thread handle.
     writer_handle: Option<thread::JoinHandle<()>>,
-}
-
-struct PacketData {
-    timestamp_ms: u64,
-    data: Vec<u8>,
-    bytes: u32,
 }
 
 impl Nasoone {
@@ -269,6 +313,7 @@ impl Nasoone {
                 }
 
                 let (tx_prod_parser, rx_prod_parser) = crossbeam_channel::unbounded();
+                let (tx_parser_writer, rx_parser_writer) = crossbeam_channel::unbounded();
 
                 let capture = self.capture.take().unwrap();
                 let state_c = self.state.clone();
@@ -280,13 +325,18 @@ impl Nasoone {
 
                 for _ in 0..num_cpus {
                     let rx_prod_parser = rx_prod_parser.clone();
+                    let tx_parser_writer = tx_parser_writer.clone();
                     let timeout = self.timeout;
-                    self.parser_handles
-                        .push(thread::spawn(move || parser_task(rx_prod_parser, timeout)));
+                    self.parser_handles.push(thread::spawn(move || {
+                        parser_task(rx_prod_parser, tx_parser_writer, timeout)
+                    }));
                 }
 
-                let output = self.output.take().unwrap();
-                self.writer_handle = Some(thread::spawn(move || writer_task(output)));
+                let mut output = self.output.take().unwrap();
+                let timeout = self.timeout;
+                self.writer_handle = Some(thread::spawn(move || {
+                    writer_task(rx_parser_writer, &mut output, timeout);
+                }));
 
                 *state = NasooneState::Running;
                 Ok(())
@@ -373,7 +423,8 @@ impl Nasoone {
 impl Drop for Nasoone {
     fn drop(&mut self) {
         if self.get_state() != NasooneState::Stopped {
-            self.stop().unwrap();
+            // try to stop the capture
+            let _ = self.stop();
         }
     }
 }

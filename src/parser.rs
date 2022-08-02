@@ -1,14 +1,18 @@
 use crate::{AddressType, PacketData, ReportKey, ReportValue};
-use crossbeam_channel::{select, tick, Receiver};
+use crossbeam_channel::{select, tick, Receiver, Sender};
 use etherparse::PacketHeaders;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
-pub(crate) fn parser_task(rx_prod_parser: Receiver<PacketData>, timeout: u32) {
-    // the ticker will send an empty message every `timeout` seconds
-    let ticker = tick(Duration::from_secs(timeout as u64));
-    let mut map: HashMap<ReportKey, ReportValue> = HashMap::new();
+pub(crate) fn parser_task(
+    rx_prod_parser: Receiver<PacketData>,
+    tx_parser_writer: Sender<HashMap<ReportKey, ReportValue>>,
+    timeout_s: u32,
+) {
+    // the ticker will send a message every `timeout` seconds
+    let ticker = tick(Duration::from_millis((timeout_s * 1000 / 4) as u64));
+    let mut map: Option<HashMap<ReportKey, ReportValue>> = Some(HashMap::new());
     loop {
         select! {
             recv(rx_prod_parser) -> packet => {
@@ -17,9 +21,10 @@ pub(crate) fn parser_task(rx_prod_parser: Receiver<PacketData>, timeout: u32) {
                     let bytes = data.bytes;
                     let packet = data.data;
                     match PacketHeaders::from_ethernet_slice(&packet){
-                        Err(value) => println!("Err {:?}", value),
+                        Err(_) => continue,
                         Ok(value) => {
                             if value.ip.is_some() && value.transport.is_some() {
+                                let map = map.as_mut().unwrap();
                                 let ports = match value.transport.unwrap() {
                                     etherparse::TransportHeader::Tcp(value) => (value.source_port, value.destination_port, 6),
                                     etherparse::TransportHeader::Udp(value) => (value.source_port, value.destination_port, 17),
@@ -69,9 +74,11 @@ pub(crate) fn parser_task(rx_prod_parser: Receiver<PacketData>, timeout: u32) {
                 }
             }
             recv(ticker) -> _ => {
-                println!("Unloading: {:?}", map);
+                // here we send the intermedia data to the writer and clean the local data
+                tx_parser_writer.send(map.take().unwrap()).unwrap();
+                map = Some(HashMap::new());
             }
         }
     }
-    println!("Parser leaving: {:?}", map);
+    tx_parser_writer.send(map.take().unwrap()).unwrap();
 }
