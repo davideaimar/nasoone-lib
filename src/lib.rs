@@ -9,12 +9,72 @@ use crate::parser::parser_task;
 use crate::producer::producer_task;
 use crate::writer::writer_task;
 use pcap::{Active, Capture, Device, Offline};
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs::File;
+use std::net::IpAddr;
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
+
+#[derive(Hash, Eq, PartialEq, Debug)]
+enum AddressType {
+    Src,
+    Dest,
+}
+
+impl Display for AddressType {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        match self {
+            AddressType::Src => write!(f, "src"),
+            AddressType::Dest => write!(f, "dest"),
+        }
+    }
+}
+
+#[derive(Hash, Eq, PartialEq, Debug)]
+struct ReportKey {
+    ip: IpAddr,
+    port: u16,
+    dir: AddressType,
+}
+
+impl Display for ReportKey {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let ip = self.ip;
+        let port = self.port.clone().to_string();
+        write!(f, "{}, {}, {}", ip, port, self.dir)
+    }
+}
+
+#[derive(Debug)]
+struct ReportValue {
+    first_timestamp_ms: u64,
+    last_timestamp_ms: u64,
+    bytes: u64,
+    protocols: HashSet<u8>,
+}
+
+impl Display for ReportValue {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let protocols = self
+            .protocols
+            .iter()
+            .map(|p| match p {
+                6 => "TCP",
+                17 => "UDP",
+                _ => "",
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        write!(
+            f,
+            "[{}], {}, {}, {}",
+            protocols, self.first_timestamp_ms, self.last_timestamp_ms, self.bytes
+        )
+    }
+}
 
 #[derive(PartialEq, Debug)]
 /// Represents in which state the capture is.
@@ -66,6 +126,10 @@ impl NetworkInterface {
     fn new(name: String, desc: Option<String>) -> NetworkInterface {
         NetworkInterface { name, desc }
     }
+
+    pub fn get_name(&self) -> String {
+        self.name.clone()
+    }
 }
 
 #[derive(Debug)]
@@ -97,6 +161,14 @@ impl Display for NasooneError {
 
 impl Error for NasooneError {}
 
+// Struct PacketData
+#[derive(Clone, Eq, PartialEq)]
+struct PacketData {
+    timestamp_ms: u64,
+    data: Vec<u8>,
+    bytes: u32,
+}
+
 /// A struct for capturing network traffic.
 pub struct Nasoone {
     /// The state of the capture.
@@ -107,12 +179,12 @@ pub struct Nasoone {
     capture: Option<NasooneCapture>,
     /// The path to the output file.
     output: Option<File>,
-}
-
-struct PacketData {
-    timestamp: u64,
-    data: Vec<u8>,
-    bytes: u32,
+    /// Producer thread handle.
+    producer_handle: Option<thread::JoinHandle<usize>>,
+    /// Parser threads handles.
+    parser_handles: Vec<thread::JoinHandle<()>>,
+    /// Writer thread handle.
+    writer_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl Nasoone {
@@ -122,6 +194,9 @@ impl Nasoone {
             timeout: 1,
             capture: None,
             output: None,
+            producer_handle: None,
+            parser_handles: Vec::new(),
+            writer_handle: None,
         }
     }
     /// Set the capture from a network interface.
@@ -238,21 +313,30 @@ impl Nasoone {
                 }
 
                 let (tx_prod_parser, rx_prod_parser) = crossbeam_channel::unbounded();
+                let (tx_parser_writer, rx_parser_writer) = crossbeam_channel::unbounded();
 
                 let capture = self.capture.take().unwrap();
                 let state_c = self.state.clone();
-                thread::spawn(move || producer_task(capture, tx_prod_parser, state_c));
+                self.producer_handle = Some(thread::spawn(move || {
+                    producer_task(capture, tx_prod_parser, state_c)
+                }));
 
                 let num_cpus = num_cpus::get();
 
                 for _ in 0..num_cpus {
                     let rx_prod_parser = rx_prod_parser.clone();
+                    let tx_parser_writer = tx_parser_writer.clone();
                     let timeout = self.timeout;
-                    thread::spawn(move || parser_task(rx_prod_parser, timeout));
+                    self.parser_handles.push(thread::spawn(move || {
+                        parser_task(rx_prod_parser, tx_parser_writer, timeout)
+                    }));
                 }
 
-                let output = self.output.take().unwrap();
-                thread::spawn(move || writer_task(output));
+                let mut output = self.output.take().unwrap();
+                let timeout = self.timeout;
+                self.writer_handle = Some(thread::spawn(move || {
+                    writer_task(rx_parser_writer, &mut output, timeout);
+                }));
 
                 *state = NasooneState::Running;
                 Ok(())
@@ -294,12 +378,19 @@ impl Nasoone {
     }
 
     /// Stop the capture if it is running or paused.
+    /// It will wait for the threads to finish.
     pub fn stop(&mut self) -> Result<(), NasooneError> {
         let mut state = self.state.1.lock().unwrap();
         match *state {
             NasooneState::Running | NasooneState::Paused => {
                 *state = NasooneState::Stopped;
+                drop(state);
                 self.state.0.notify_one();
+                self.writer_handle.take().unwrap().join().unwrap();
+                self.producer_handle.take().unwrap().join().unwrap();
+                for handle in self.parser_handles.drain(..) {
+                    handle.join().unwrap();
+                }
                 Ok(())
             }
             _ => Err(NasooneError::InvalidState(
@@ -326,6 +417,15 @@ impl Nasoone {
             .map(|d| NetworkInterface::new(d.name, d.desc))
             .collect();
         Ok(devices)
+    }
+}
+
+impl Drop for Nasoone {
+    fn drop(&mut self) {
+        if self.get_state() != NasooneState::Stopped {
+            // try to stop the capture
+            let _ = self.stop();
+        }
     }
 }
 
