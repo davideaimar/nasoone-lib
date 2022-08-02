@@ -49,6 +49,6 @@ pub(crate) fn producer_task(
         }
     }
     *state.1.lock().unwrap() = NasooneState::Stopped;
-    println!("producer_task: {} packets processed", cnt);
+    println!("producer task: {} packets processed", cnt);
     cnt
 }

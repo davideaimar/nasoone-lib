@@ -56,8 +56,8 @@ fn filters() {
 #[test]
 fn test_pause_stop() {
     let mut naso = Nasoone::new();
-    //naso.set_capture_file("./tests/data/http.pcap").unwrap();
-    naso.set_capture_device("en0").unwrap();
+    naso.set_capture_file("./tests/data/http.pcap").unwrap();
+    //naso.set_capture_device("en0").unwrap();
     naso.set_output("./tests/output/test4").unwrap();
     naso.start().unwrap();
     println!("Started");

@@ -129,6 +129,12 @@ pub struct Nasoone {
     capture: Option<NasooneCapture>,
     /// The path to the output file.
     output: Option<File>,
+    /// Producer thread handle.
+    producer_handle: Option<thread::JoinHandle<usize>>,
+    /// Parser threads handles.
+    parser_handles: Vec<thread::JoinHandle<()>>,
+    /// Writer thread handle.
+    writer_handle: Option<thread::JoinHandle<()>>,
 }
 
 struct PacketData {
@@ -144,6 +150,9 @@ impl Nasoone {
             timeout: 1,
             capture: None,
             output: None,
+            producer_handle: None,
+            parser_handles: Vec::new(),
+            writer_handle: None,
         }
     }
     /// Set the capture from a network interface.
@@ -263,18 +272,21 @@ impl Nasoone {
 
                 let capture = self.capture.take().unwrap();
                 let state_c = self.state.clone();
-                thread::spawn(move || producer_task(capture, tx_prod_parser, state_c));
+                self.producer_handle = Some(thread::spawn(move || {
+                    producer_task(capture, tx_prod_parser, state_c)
+                }));
 
                 let num_cpus = num_cpus::get();
 
                 for _ in 0..num_cpus {
                     let rx_prod_parser = rx_prod_parser.clone();
                     let timeout = self.timeout;
-                    thread::spawn(move || parser_task(rx_prod_parser, timeout));
+                    self.parser_handles
+                        .push(thread::spawn(move || parser_task(rx_prod_parser, timeout)));
                 }
 
                 let output = self.output.take().unwrap();
-                thread::spawn(move || writer_task(output));
+                self.writer_handle = Some(thread::spawn(move || writer_task(output)));
 
                 *state = NasooneState::Running;
                 Ok(())
@@ -316,12 +328,19 @@ impl Nasoone {
     }
 
     /// Stop the capture if it is running or paused.
+    /// It will wait for the threads to finish.
     pub fn stop(&mut self) -> Result<(), NasooneError> {
         let mut state = self.state.1.lock().unwrap();
         match *state {
             NasooneState::Running | NasooneState::Paused => {
                 *state = NasooneState::Stopped;
+                drop(state);
                 self.state.0.notify_one();
+                self.writer_handle.take().unwrap().join().unwrap();
+                self.producer_handle.take().unwrap().join().unwrap();
+                for handle in self.parser_handles.drain(..) {
+                    handle.join().unwrap();
+                }
                 Ok(())
             }
             _ => Err(NasooneError::InvalidState(
@@ -348,6 +367,14 @@ impl Nasoone {
             .map(|d| NetworkInterface::new(d.name, d.desc))
             .collect();
         Ok(devices)
+    }
+}
+
+impl Drop for Nasoone {
+    fn drop(&mut self) {
+        if self.get_state() != NasooneState::Stopped {
+            self.stop().unwrap();
+        }
     }
 }
 
