@@ -55,6 +55,7 @@ fn filters() {
 
 #[test]
 fn test_pause_stop() {
+    let _ = remove_file("./tests/output/test4");
     let mut naso = Nasoone::new();
     naso.set_capture_file("./tests/data/http.pcap").unwrap();
     //naso.set_capture_device("en0").unwrap();
@@ -67,7 +68,7 @@ fn test_pause_stop() {
         println!("Paused");
     } else {
         match res.err().unwrap() {
-            NasooneError::InvalidState(_) => {
+            NasooneError::CaptureOver => {
                 println!("Capture already finished");
                 remove_file("./tests/output/test4").unwrap();
                 return;
@@ -77,9 +78,8 @@ fn test_pause_stop() {
     }
     // wait 0.1 second in paused state
     sleep(Duration::from_millis(100));
-    // resume the capture
-    naso.resume().unwrap();
-    println!("Resumed");
+    // try to resume the capture, could fail because it's already finished
+    let _ = naso.resume();
     // wait 0.5 second in running state
     sleep(Duration::from_millis(500));
     // stop the capture, could fail because the capture has already finished
@@ -101,6 +101,7 @@ fn test_filter_stop() {
     naso.start().unwrap();
     sleep(Duration::from_secs(1));
     naso.stop().unwrap();
+    let _ = remove_file("./tests/output/test5");
 }
 
 #[test]
@@ -126,6 +127,7 @@ fn test_no_lost_packets() {
         }
         None => panic!("No stats found"),
     }
+    let _ = remove_file("./tests/output/test6");
 }
 
 #[test]
@@ -143,4 +145,5 @@ fn test_stop_duration() {
     naso.stop().unwrap();
     let duration = start.elapsed();
     println!("Duration of stop function: {:?}", duration);
+    let _ = remove_file("./tests/output/test7");
 }

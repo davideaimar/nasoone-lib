@@ -8,6 +8,7 @@ mod writer;
 use crate::parser::parser_task;
 use crate::producer::producer_task;
 use crate::writer::writer_task;
+use crossbeam_channel::Sender;
 use pcap::{Active, Capture, Device, Offline, Stat};
 use std::collections::HashSet;
 use std::error::Error;
@@ -15,7 +16,6 @@ use std::fmt::{Debug, Display, Formatter};
 use std::fs::File;
 use std::net::IpAddr;
 use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
 #[derive(Hash, Eq, PartialEq, Debug)]
@@ -31,6 +31,12 @@ impl Display for AddressType {
             AddressType::Dest => write!(f, "dest"),
         }
     }
+}
+
+enum Command {
+    Stop,
+    Pause,
+    Resume,
 }
 
 #[derive(Hash, Eq, PartialEq, Debug)]
@@ -148,10 +154,6 @@ impl NetworkInterface {
     fn new(name: String, desc: Option<String>) -> NetworkInterface {
         NetworkInterface { name, desc }
     }
-
-    pub fn get_name(&self) -> String {
-        self.name.clone()
-    }
 }
 
 #[derive(Debug)]
@@ -167,8 +169,10 @@ pub enum NasooneError {
     UnsetCapture,
     /// The capture output file is not set.
     UnsetOutput,
-    /// The timeout is not a valid u32.
+    /// The timeout is not valid.
     InvalidTimeout,
+    /// The capture has finished by itself.
+    CaptureOver,
 }
 
 impl Display for NasooneError {
@@ -180,13 +184,13 @@ impl Display for NasooneError {
             NasooneError::UnsetCapture => write!(f, "Capture is not set"),
             NasooneError::UnsetOutput => write!(f, "Output is not set"),
             NasooneError::InvalidTimeout => write!(f, "Invalid timeout"),
+            NasooneError::CaptureOver => write!(f, "Capture is over"),
         }
     }
 }
 
 impl Error for NasooneError {}
 
-// Struct PacketData
 #[derive(Clone, Eq, PartialEq)]
 struct PacketData {
     timestamp_ms: u64,
@@ -197,7 +201,9 @@ struct PacketData {
 /// A struct for capturing network traffic.
 pub struct Nasoone {
     /// The state of the capture.
-    state: Arc<(Condvar, Mutex<NasooneState>)>,
+    state: NasooneState,
+    /// The channel sender for sending the state change to the producer thread.
+    tx_main_prod: Option<Sender<Command>>,
     /// The periodical timeout after which the output file is updated.
     timeout: u32,
     /// The pcap capture.
@@ -215,7 +221,8 @@ pub struct Nasoone {
 impl Nasoone {
     pub fn new() -> Self {
         Self {
-            state: Arc::new((Condvar::new(), Mutex::new(NasooneState::Initial))),
+            state: NasooneState::Initial,
+            tx_main_prod: None,
             timeout: 1,
             capture: None,
             output: None,
@@ -226,7 +233,7 @@ impl Nasoone {
     }
     /// Set the capture from a network interface.
     pub fn set_capture_device(&mut self, device: &str) -> Result<(), NasooneError> {
-        match *self.state.1.lock().unwrap() {
+        match self.state {
             NasooneState::Initial => {
                 let capture = Capture::from_device(device).map_err(NasooneError::PcapError)?;
                 let capture = capture
@@ -245,7 +252,7 @@ impl Nasoone {
     }
     /// Set the capture from a pcap file.
     pub fn set_capture_file(&mut self, file: &str) -> Result<(), NasooneError> {
-        match *self.state.1.lock().unwrap() {
+        match self.state {
             NasooneState::Initial => {
                 let capture = Capture::from_file(file).map_err(NasooneError::PcapError)?;
                 self.capture = Some(NasooneCapture::FromFile(capture));
@@ -261,7 +268,7 @@ impl Nasoone {
         if timeout == 0 {
             return Err(NasooneError::InvalidTimeout);
         }
-        match *self.state.1.lock().unwrap() {
+        match self.state {
             NasooneState::Initial => {
                 self.timeout = timeout;
                 Ok(())
@@ -275,7 +282,7 @@ impl Nasoone {
     /// The filter is a [BPF](https://biot.com/capstats/bpf.html) string that is passed to pcap.
     /// Multiple calls to this function will overwrite the previous filter.
     pub fn set_filter(&mut self, filter: &str) -> Result<(), NasooneError> {
-        match *self.state.1.lock().unwrap() {
+        match self.state {
             NasooneState::Initial => match self.capture {
                 Some(NasooneCapture::FromDevice(ref mut capture)) => {
                     capture
@@ -298,7 +305,7 @@ impl Nasoone {
     }
     /// Set the output file.
     pub fn set_output(&mut self, output_file: &str) -> Result<(), NasooneError> {
-        match *self.state.1.lock().unwrap() {
+        match self.state {
             NasooneState::Initial => {
                 let path = Path::new(output_file);
                 if path.exists() {
@@ -329,8 +336,7 @@ impl Nasoone {
 
     /// Start the capture.
     pub fn start(&mut self) -> Result<(), NasooneError> {
-        let mut state = self.state.1.lock().unwrap();
-        match *state {
+        match self.state {
             NasooneState::Initial => {
                 // Create all the threads and start the capture.
 
@@ -341,13 +347,14 @@ impl Nasoone {
                     return Err(NasooneError::UnsetOutput);
                 }
 
+                let (tx_main_prod, rx_main_prod) = crossbeam_channel::unbounded();
                 let (tx_prod_parser, rx_prod_parser) = crossbeam_channel::unbounded();
                 let (tx_parser_writer, rx_parser_writer) = crossbeam_channel::unbounded();
 
                 let capture = self.capture.take().unwrap();
-                let state_c = self.state.clone();
+                self.tx_main_prod = Some(tx_main_prod);
                 self.producer_handle = Some(thread::spawn(move || {
-                    producer_task(capture, tx_prod_parser, state_c)
+                    producer_task(capture, tx_prod_parser, rx_main_prod)
                 }));
 
                 let num_cpus = num_cpus::get();
@@ -367,7 +374,7 @@ impl Nasoone {
                     writer_task(rx_parser_writer, &mut output, timeout);
                 }));
 
-                *state = NasooneState::Running;
+                self.state = NasooneState::Running;
                 Ok(())
             }
             _ => Err(NasooneError::InvalidState(
@@ -378,12 +385,13 @@ impl Nasoone {
 
     /// Pause the capture if it is running.
     pub fn pause(&mut self) -> Result<(), NasooneError> {
-        let mut state = self.state.1.lock().unwrap();
-        match *state {
+        match self.state {
             NasooneState::Running => {
-                *state = NasooneState::Paused;
-                self.state.0.notify_one();
-                Ok(())
+                self.state = NasooneState::Paused;
+                match self.tx_main_prod.as_ref().unwrap().send(Command::Pause) {
+                    Ok(_) => Ok(()),
+                    Err(_) => Err(NasooneError::CaptureOver),
+                }
             }
             _ => Err(NasooneError::InvalidState(
                 "Nasoone is not running".to_string(),
@@ -393,12 +401,13 @@ impl Nasoone {
 
     /// Resume the capture if it is paused.
     pub fn resume(&mut self) -> Result<(), NasooneError> {
-        let mut state = self.state.1.lock().unwrap();
-        match *state {
+        match self.state {
             NasooneState::Paused => {
-                *state = NasooneState::Running;
-                self.state.0.notify_one();
-                Ok(())
+                self.state = NasooneState::Running;
+                match self.tx_main_prod.as_ref().unwrap().send(Command::Resume) {
+                    Ok(_) => Ok(()),
+                    Err(_) => Err(NasooneError::CaptureOver),
+                }
             }
             _ => Err(NasooneError::InvalidState(
                 "Nasoone is not running".to_string(),
@@ -409,12 +418,10 @@ impl Nasoone {
     /// Stop the capture if it is running or paused.
     /// It will wait for the threads to finish.
     pub fn stop(&mut self) -> Result<Option<NasooneStats>, NasooneError> {
-        let mut state = self.state.1.lock().unwrap();
-        match *state {
+        match self.state {
             NasooneState::Running | NasooneState::Paused => {
-                *state = NasooneState::Stopped;
-                drop(state);
-                self.state.0.notify_one();
+                self.state = NasooneState::Stopped;
+                let _ = self.tx_main_prod.as_ref().unwrap().send(Command::Stop); // ignore a possible error that would mean that the producer thread is already stopped
                 let stat = self.producer_handle.take().unwrap().join().unwrap();
                 for handle in self.parser_handles.drain(..) {
                     handle.join().unwrap();
@@ -433,7 +440,7 @@ impl Nasoone {
 
     /// Get the current state of the capture.
     pub fn get_state(&self) -> NasooneState {
-        match *self.state.1.lock().unwrap() {
+        match self.state {
             NasooneState::Initial => NasooneState::Initial,
             NasooneState::Running => NasooneState::Running,
             NasooneState::Paused => NasooneState::Paused,
@@ -460,7 +467,7 @@ impl Nasoone {
 
 impl Drop for Nasoone {
     fn drop(&mut self) {
-        if self.get_state() != NasooneState::Stopped {
+        if self.state != NasooneState::Stopped {
             // try to stop the capture
             let _ = self.stop();
         }
