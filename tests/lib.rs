@@ -1,7 +1,7 @@
 use nasoone_lib::{Nasoone, NasooneError};
 use std::fs::remove_file;
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[test]
 fn it_compiles() {
@@ -87,50 +87,60 @@ fn test_pause_stop() {
     let _ = remove_file("./tests/output/test4");
 }
 
-// commented for privilegeed user, need to be fixed
-/*
 #[test]
-fn test_send_collection() {
+#[ignore] // ignored because need privileged access, and it is not available on the CI
+          // test that the absence of valid packets will not block the stop() function
+fn test_filter_stop() {
+    let _ = remove_file("./tests/output/test5");
     let mut naso = Nasoone::new();
-    //println!("{:?}", Nasoone::list_devices().unwrap());
-    naso.set_capture_device(Nasoone::list_devices().unwrap()[0].get_name().as_str()).unwrap();
+    naso.set_capture_device(Nasoone::get_default_device_name().unwrap().as_str())
+        .unwrap();
     naso.set_output("./tests/output/test5").unwrap();
+    naso.set_timeout(10).unwrap();
+    naso.set_filter("host 1.2.3.4").unwrap();
     naso.start().unwrap();
-    println!("Started");
-    let _ = naso.stop();
-    //remove_file("./tests/output/test5").unwrap();
+    sleep(Duration::from_secs(1));
+    naso.stop().unwrap();
 }
-*/
+
 #[test]
-fn test_send_collection_with_pause() {
-    let mut naso = Nasoone::new();
-    naso.set_capture_file("./tests/data/http.pcap").unwrap();
-    //naso.set_capture_device(Nasoone::list_devices().unwrap()[0].get_name().as_str()).unwrap();
-    naso.set_output("./tests/output/test6").unwrap();
-    naso.start().unwrap();
-    println!("Started");
-    // try to pause, could fail because the capture has already finished
-    let res = naso.pause();
-    if res.is_ok() {
-        println!("Paused");
-    } else {
-        match res.err().unwrap() {
-            NasooneError::InvalidState(_) => {
-                println!("Capture already finished");
-                remove_file("./tests/output/test6").unwrap();
-                return;
-            }
-            _ => panic!("Unexpected error"),
-        }
-    }
-    // wait 0.3 second in paused state
-    sleep(Duration::from_millis(300));
-    // resume the capture
-    naso.resume().unwrap();
-    println!("Resumed");
-    // wait 2 second in running state
-    sleep(Duration::from_millis(2000));
-    // stop the capture, could fail because the capture has already finished
-    let _ = naso.stop();
+#[ignore] // ignored because need privileged access, and it is not available on the CI
+fn test_no_lost_packets() {
     let _ = remove_file("./tests/output/test6");
+    let mut naso = Nasoone::new();
+    naso.set_capture_device(Nasoone::get_default_device_name().unwrap().as_str())
+        .unwrap();
+    naso.set_output("./tests/output/test6").unwrap();
+    naso.set_timeout(10).unwrap();
+    naso.set_filter("host 1.2.3.4").unwrap();
+    naso.start().unwrap();
+    sleep(Duration::from_secs(1));
+    let start = Instant::now();
+    let stats = naso.stop().unwrap();
+    let duration = start.elapsed();
+    println!("Duration of stop function: {:?}", duration);
+    match stats {
+        Some(stats) => {
+            println!("{:?}", stats);
+            assert_eq!(stats.dropped, 0);
+        }
+        None => panic!("No stats found"),
+    }
+}
+
+#[test]
+#[ignore]
+fn test_stop_duration() {
+    let _ = remove_file("./tests/output/test7");
+    let mut naso = Nasoone::new();
+    naso.set_capture_device(Nasoone::get_default_device_name().unwrap().as_str())
+        .unwrap();
+    naso.set_output("./tests/output/test7").unwrap();
+    naso.set_timeout(1).unwrap();
+    naso.start().unwrap();
+    sleep(Duration::from_micros(100));
+    let start = Instant::now();
+    naso.stop().unwrap();
+    let duration = start.elapsed();
+    println!("Duration of stop function: {:?}", duration);
 }
