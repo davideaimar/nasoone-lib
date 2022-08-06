@@ -50,7 +50,7 @@ impl Display for ReportKey {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let ip = self.ip;
         let port = self.port.clone().to_string();
-        write!(f, "{}, {}, {}", ip, port, self.dir)
+        write!(f, "{}; {}; {}", ip, port, self.dir)
     }
 }
 
@@ -59,6 +59,7 @@ struct ReportValue {
     first_timestamp_ms: u64,
     last_timestamp_ms: u64,
     bytes: u64,
+    packets_count: usize,
     protocols: HashSet<u8>,
 }
 
@@ -76,8 +77,12 @@ impl Display for ReportValue {
             .join(", ");
         write!(
             f,
-            "[{}], {}, {}, {}",
-            protocols, self.first_timestamp_ms, self.last_timestamp_ms, self.bytes
+            "[{}]; {}; {}; {}; {}",
+            protocols,
+            self.first_timestamp_ms,
+            self.last_timestamp_ms,
+            self.bytes,
+            self.packets_count
         )
     }
 }

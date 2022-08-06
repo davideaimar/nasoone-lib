@@ -138,12 +138,17 @@ fn test_stop_duration() {
     naso.set_capture_device(Nasoone::get_default_device_name().unwrap().as_str())
         .unwrap();
     naso.set_output("./tests/output/test7").unwrap();
-    naso.set_timeout(1).unwrap();
     naso.start().unwrap();
-    sleep(Duration::from_micros(100));
+    sleep(Duration::from_millis(5000));
     let start = Instant::now();
-    naso.stop().unwrap();
+    let stats = naso.stop().unwrap();
     let duration = start.elapsed();
     println!("Duration of stop function: {:?}", duration);
+    match stats {
+        Some(stats) => {
+            println!("{:?}", stats);
+        }
+        None => {}
+    }
     let _ = remove_file("./tests/output/test7");
 }

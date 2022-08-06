@@ -1,5 +1,5 @@
 use crate::{Command, NasooneCapture, PacketData};
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use pcap::{Error, Stat};
 
 /// The producer thread. Its task is to receive packets from pcap, clone the data and send it to a
@@ -33,7 +33,10 @@ pub(crate) fn producer_task(
                 Ok(Command::Stop) => break,
                 Ok(Command::Pause) => ignore_packets = true,
                 Ok(Command::Resume) => ignore_packets = false,
-                Err(_) => break,
+                Err(err) => match err {
+                    TryRecvError::Empty => (),
+                    TryRecvError::Disconnected => break,
+                },
             }
         }
 
