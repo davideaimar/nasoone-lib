@@ -1,4 +1,4 @@
-use nasoone_lib::{Nasoone, NasooneError};
+use nasoone_lib::{Nasoone, NasooneError, NasooneState};
 use std::fs::remove_file;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -54,6 +54,22 @@ fn filters() {
 }
 
 #[test]
+fn test_finished_state() {
+    let _ = remove_file("./tests/output/test_finished");
+    let mut naso = Nasoone::new();
+    naso.set_capture_file("./tests/data/http.pcap").unwrap();
+    naso.set_output("./tests/output/test_finished").unwrap();
+    naso.start().unwrap();
+    sleep(Duration::from_secs(1));
+    match naso.get_state() {
+        NasooneState::Finished => {}
+        _ => panic!("Nasoone should be in Finished state"),
+    }
+    let _ = naso.stop().unwrap();
+    remove_file("./tests/output/test_finished").unwrap();
+}
+
+#[test]
 fn test_pause_stop() {
     let _ = remove_file("./tests/output/test4");
     let mut naso = Nasoone::new();
@@ -85,6 +101,14 @@ fn test_pause_stop() {
     // stop the capture, could fail because the capture has already finished
     let _ = naso.stop();
     let _ = remove_file("./tests/output/test4");
+}
+
+#[test]
+#[ignore]
+fn test_device_list() {
+    let _ = remove_file("./tests/output/test_device_list");
+    let devices = Nasoone::list_devices().unwrap();
+    println!("{:?}", devices);
 }
 
 #[test]

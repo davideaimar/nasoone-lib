@@ -87,7 +87,7 @@ impl Display for ReportValue {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 /// Represents in which state the capture is.
 pub enum NasooneState {
     /// The capture is not started and can be configured
@@ -96,6 +96,8 @@ pub enum NasooneState {
     Running,
     /// The capture is paused and can be resumed or stopped.
     Paused,
+    /// The capture has finished, the user can retrieve stats calling stop.
+    Finished,
     /// The capture is stopped and can only return to Initial.
     Stopped,
 }
@@ -422,9 +424,11 @@ impl Nasoone {
 
     /// Stop the capture if it is running or paused.
     /// It will wait for the threads to finish.
+    /// Return the statistics of the capture, only if the capture is from a network interface.
+    /// Otherwise, it will return None.
     pub fn stop(&mut self) -> Result<Option<NasooneStats>, NasooneError> {
         match self.state {
-            NasooneState::Running | NasooneState::Paused => {
+            NasooneState::Running | NasooneState::Paused | NasooneState::Finished => {
                 self.state = NasooneState::Stopped;
                 let _ = self.tx_main_prod.as_ref().unwrap().send(Command::Stop); // ignore a possible error that would mean that the producer thread is already stopped
                 let stat = self.producer_handle.take().unwrap().join().unwrap();
@@ -444,19 +448,20 @@ impl Nasoone {
     }
 
     /// Get the current state of the capture.
-    pub fn get_state(&self) -> NasooneState {
-        match self.state {
-            NasooneState::Initial => NasooneState::Initial,
-            NasooneState::Running => NasooneState::Running,
-            NasooneState::Paused => NasooneState::Paused,
-            NasooneState::Stopped => NasooneState::Stopped,
+    pub fn get_state(&mut self) -> NasooneState {
+        // control if the capture has finished by itself
+        if self.producer_handle.as_ref().is_some()
+            && self.producer_handle.as_ref().unwrap().is_finished()
+        {
+            self.state = NasooneState::Finished;
         }
+        self.state.clone()
     }
 
     /// Get the list of available network interfaces.
     pub fn list_devices() -> Result<Vec<NetworkInterface>, NasooneError> {
-        let devices = Device::list().map_err(NasooneError::PcapError)?;
-        let devices = devices
+        let devices = Device::list()
+            .map_err(NasooneError::PcapError)?
             .into_iter()
             .map(|d| NetworkInterface::new(d.name, d.desc))
             .collect();
