@@ -1,4 +1,4 @@
-use nasoone_lib::{Nasoone, NasooneError};
+use nasoone_lib::{Nasoone, NasooneError, NasooneState};
 use std::fs::remove_file;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -54,7 +54,24 @@ fn filters() {
 }
 
 #[test]
+fn test_finished_state() {
+    let _ = remove_file("./tests/output/test_finished");
+    let mut naso = Nasoone::new();
+    naso.set_capture_file("./tests/data/http.pcap").unwrap();
+    naso.set_output("./tests/output/test_finished").unwrap();
+    naso.start().unwrap();
+    sleep(Duration::from_secs(1));
+    match naso.get_state() {
+        NasooneState::Finished => {}
+        _ => panic!("Nasoone should be in Finished state"),
+    }
+    let _ = naso.stop().unwrap();
+    remove_file("./tests/output/test_finished").unwrap();
+}
+
+#[test]
 fn test_pause_stop() {
+    let _ = remove_file("./tests/output/test4");
     let mut naso = Nasoone::new();
     naso.set_capture_file("./tests/data/http.pcap").unwrap();
     //naso.set_capture_device("en0").unwrap();
@@ -67,7 +84,7 @@ fn test_pause_stop() {
         println!("Paused");
     } else {
         match res.err().unwrap() {
-            NasooneError::InvalidState(_) => {
+            NasooneError::CaptureOver => {
                 println!("Capture already finished");
                 remove_file("./tests/output/test4").unwrap();
                 return;
@@ -77,14 +94,21 @@ fn test_pause_stop() {
     }
     // wait 0.1 second in paused state
     sleep(Duration::from_millis(100));
-    // resume the capture
-    naso.resume().unwrap();
-    println!("Resumed");
+    // try to resume the capture, could fail because it's already finished
+    let _ = naso.resume();
     // wait 0.5 second in running state
     sleep(Duration::from_millis(500));
     // stop the capture, could fail because the capture has already finished
     let _ = naso.stop();
     let _ = remove_file("./tests/output/test4");
+}
+
+#[test]
+#[ignore]
+fn test_device_list() {
+    let _ = remove_file("./tests/output/test_device_list");
+    let devices = Nasoone::list_devices().unwrap();
+    println!("{:?}", devices);
 }
 
 #[test]
@@ -101,6 +125,7 @@ fn test_filter_stop() {
     naso.start().unwrap();
     sleep(Duration::from_secs(1));
     naso.stop().unwrap();
+    let _ = remove_file("./tests/output/test5");
 }
 
 #[test]
@@ -126,6 +151,7 @@ fn test_no_lost_packets() {
         }
         None => panic!("No stats found"),
     }
+    let _ = remove_file("./tests/output/test6");
 }
 
 #[test]
@@ -136,11 +162,17 @@ fn test_stop_duration() {
     naso.set_capture_device(Nasoone::get_default_device_name().unwrap().as_str())
         .unwrap();
     naso.set_output("./tests/output/test7").unwrap();
-    naso.set_timeout(1).unwrap();
     naso.start().unwrap();
-    sleep(Duration::from_micros(100));
+    sleep(Duration::from_millis(5000));
     let start = Instant::now();
-    naso.stop().unwrap();
+    let stats = naso.stop().unwrap();
     let duration = start.elapsed();
     println!("Duration of stop function: {:?}", duration);
+    match stats {
+        Some(stats) => {
+            println!("{:?}", stats);
+        }
+        None => {}
+    }
+    let _ = remove_file("./tests/output/test7");
 }

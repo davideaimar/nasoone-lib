@@ -45,11 +45,13 @@ pub(crate) fn parser_task(
                                     first_timestamp_ms: ts,
                                     last_timestamp_ms: ts,
                                     bytes: 0,
+                                    packets_count: 0,
                                 });
                                 info.protocols.insert(ports.2);
                                 info.bytes += bytes as u64;
                                 info.last_timestamp_ms = info.last_timestamp_ms.max(ts);
                                 info.first_timestamp_ms = info.first_timestamp_ms.min(ts);
+                                info.packets_count += 1;
                                 let key_dest = ReportKey {
                                     ip: ip_info.1,
                                     port: ports.1,
@@ -60,12 +62,13 @@ pub(crate) fn parser_task(
                                     first_timestamp_ms: ts,
                                     last_timestamp_ms: ts,
                                     bytes: 0,
+                                    packets_count: 0
                                 });
                                 info.protocols.insert(ports.2);
                                 info.bytes += bytes as u64;
                                 info.last_timestamp_ms = info.last_timestamp_ms.max(ts);
                                 info.first_timestamp_ms = info.first_timestamp_ms.min(ts);
-
+                                info.packets_count += 1;
                             }
                         }
                     }
