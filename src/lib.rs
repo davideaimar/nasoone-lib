@@ -41,16 +41,20 @@ enum Command {
 
 #[derive(Hash, Eq, PartialEq, Debug)]
 struct ReportKey {
-    ip: IpAddr,
-    port: u16,
+    source_ip: IpAddr,
+    source_port: u16,
+    destination_ip: IpAddr,
+    destination_port: u16,
     dir: AddressType,
 }
 
 impl Display for ReportKey {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let ip = self.ip;
-        let port = self.port.clone().to_string();
-        write!(f, "{}; {}; {}", ip, port, self.dir)
+        let source_ip = self.source_ip;
+        let source_port = self.source_port.clone().to_string();
+        let dest_ip = self.destination_ip;
+        let dest_port = self.destination_port;
+        write!(f, "{}; {}; {}; {}; {}", source_ip, source_port, dest_ip, dest_port, self.dir)
     }
 }
 
