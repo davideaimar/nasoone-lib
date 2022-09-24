@@ -40,7 +40,6 @@ pub(crate) fn parser_task(
                                     source_port: ports.0,
                                     destination_ip: ip_info.1,
                                     destination_port: ports.1,
-                                    dir: AddressType::Src,
                                 };
                                 let mut info = map.entry(key).or_insert(ReportValue {
                                     protocols: HashSet::new(),

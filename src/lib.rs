@@ -45,7 +45,6 @@ struct ReportKey {
     source_port: u16,
     destination_ip: IpAddr,
     destination_port: u16,
-    dir: AddressType,
 }
 
 impl Display for ReportKey {
@@ -54,7 +53,7 @@ impl Display for ReportKey {
         let source_port = self.source_port.clone().to_string();
         let dest_ip = self.destination_ip;
         let dest_port = self.destination_port;
-        write!(f, "{}; {}; {}; {}; {}", source_ip, source_port, dest_ip, dest_port, self.dir)
+        write!(f, "{}; {}; {}; {}", source_ip, source_port, dest_ip, dest_port)
     }
 }
 

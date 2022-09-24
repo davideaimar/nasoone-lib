@@ -11,7 +11,7 @@ fn it_compiles() {
     //naso.set_filter("ip host 192.168.1.1").unwrap();
     naso.start().unwrap();
     assert!(Nasoone::list_devices().is_ok());
-    remove_file("./tests/output/test1").unwrap();
+    //remove_file("./tests/output/test1").unwrap();
 }
 
 #[test]

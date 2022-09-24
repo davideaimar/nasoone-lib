@@ -9,7 +9,7 @@ fn overwrite_file(file: &mut File, data: &HashMap<ReportKey, ReportValue>) -> st
     file.seek(SeekFrom::Start(0))?;
     writeln!(
         file,
-        "source ip; source port; destination ip; destination port; dir; protocols; first; last; bytes; packets"
+        "source ip; source port; destination ip; destination port; protocols; first; last; bytes; packets"
     )
     .expect("Failed to write to file");
     data.iter().for_each(|entry| {
