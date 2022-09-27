@@ -7,10 +7,13 @@ use std::{fs::File, io::Write};
 
 fn overwrite_file(file: &mut File, data: &HashMap<ReportKey, ReportValue>) -> std::io::Result<()> {
     file.seek(SeekFrom::Start(0))?;
-    writeln!(file, "ip, port, dir, protocols, first, last, bytes")
-        .expect("Failed to write to file");
+    writeln!(
+        file,
+        "source ip; source port; destination ip; destination port; protocols; first; last; bytes; packets"
+    )
+    .expect("Failed to write to file");
     data.iter().for_each(|entry| {
-        writeln!(file, "{}, {}", entry.0, entry.1).expect("Failed to write to file");
+        writeln!(file, "{}; {}", entry.0, entry.1).expect("Failed to write to file");
     });
     Ok(())
 }
@@ -32,11 +35,13 @@ pub(crate) fn writer_task(
                             first_timestamp_ms: value.first_timestamp_ms,
                             last_timestamp_ms: value.first_timestamp_ms,
                             bytes: 0,
+                            packets_count: 0,
                         });
                         info.protocols.extend(value.protocols);
                         info.bytes += value.bytes;
                         info.last_timestamp_ms = info.last_timestamp_ms.max(value.last_timestamp_ms);
                         info.first_timestamp_ms = info.first_timestamp_ms.min(value.first_timestamp_ms);
+                        info.packets_count += value.packets_count;
                     }
                 } else {
                     break;

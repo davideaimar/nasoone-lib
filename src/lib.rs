@@ -8,43 +8,41 @@ mod writer;
 use crate::parser::parser_task;
 use crate::producer::producer_task;
 use crate::writer::writer_task;
-use pcap::{Active, Capture, Device, Offline};
+use crossbeam_channel::Sender;
+use pcap::{Active, Capture, Device, Offline, Stat};
 use std::collections::HashSet;
 use std::error::Error;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::fs::File;
 use std::net::IpAddr;
 use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
-#[derive(Hash, Eq, PartialEq, Debug)]
-enum AddressType {
-    Src,
-    Dest,
-}
-
-impl Display for AddressType {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        match self {
-            AddressType::Src => write!(f, "src"),
-            AddressType::Dest => write!(f, "dest"),
-        }
-    }
+enum Command {
+    Stop,
+    Pause,
+    Resume,
 }
 
 #[derive(Hash, Eq, PartialEq, Debug)]
 struct ReportKey {
-    ip: IpAddr,
-    port: u16,
-    dir: AddressType,
+    source_ip: IpAddr,
+    source_port: u16,
+    destination_ip: IpAddr,
+    destination_port: u16,
 }
 
 impl Display for ReportKey {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let ip = self.ip;
-        let port = self.port.clone().to_string();
-        write!(f, "{}, {}, {}", ip, port, self.dir)
+        let source_ip = self.source_ip;
+        let source_port = self.source_port.clone().to_string();
+        let dest_ip = self.destination_ip;
+        let dest_port = self.destination_port;
+        write!(
+            f,
+            "{}; {}; {}; {}",
+            source_ip, source_port, dest_ip, dest_port
+        )
     }
 }
 
@@ -53,6 +51,7 @@ struct ReportValue {
     first_timestamp_ms: u64,
     last_timestamp_ms: u64,
     bytes: u64,
+    packets_count: usize,
     protocols: HashSet<u8>,
 }
 
@@ -70,13 +69,17 @@ impl Display for ReportValue {
             .join(", ");
         write!(
             f,
-            "[{}], {}, {}, {}",
-            protocols, self.first_timestamp_ms, self.last_timestamp_ms, self.bytes
+            "[{}]; {}; {}; {}; {}",
+            protocols,
+            self.first_timestamp_ms,
+            self.last_timestamp_ms,
+            self.bytes,
+            self.packets_count
         )
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 /// Represents in which state the capture is.
 pub enum NasooneState {
     /// The capture is not started and can be configured
@@ -85,8 +88,32 @@ pub enum NasooneState {
     Running,
     /// The capture is paused and can be resumed or stopped.
     Paused,
+    /// The capture has finished, the user can retrieve stats calling stop.
+    Finished,
     /// The capture is stopped and can only return to Initial.
     Stopped,
+}
+
+#[derive(Debug)]
+/// Represents the pcap statistics about a capture (from https://docs.rs/pcap/0.9.2/pcap/index.html.)
+pub struct NasooneStats {
+    /// Number of packets received
+    pub received: u32,
+    /// Number of packets dropped because there was no room in the operating system's buffer when
+    /// they arrived, because packets weren't being read fast enough
+    pub dropped: u32,
+    /// Number of packets dropped by the network interface or its driver
+    pub if_dropped: u32,
+}
+
+impl From<Stat> for NasooneStats {
+    fn from(stat: Stat) -> Self {
+        Self {
+            received: stat.received,
+            dropped: stat.dropped,
+            if_dropped: stat.if_dropped,
+        }
+    }
 }
 
 /// Abstraction of the pcap capture.
@@ -126,10 +153,6 @@ impl NetworkInterface {
     fn new(name: String, desc: Option<String>) -> NetworkInterface {
         NetworkInterface { name, desc }
     }
-
-    pub fn get_name(&self) -> String {
-        self.name.clone()
-    }
 }
 
 #[derive(Debug)]
@@ -145,6 +168,10 @@ pub enum NasooneError {
     UnsetCapture,
     /// The capture output file is not set.
     UnsetOutput,
+    /// The timeout is not valid.
+    InvalidTimeout,
+    /// The capture has finished by itself.
+    CaptureOver,
 }
 
 impl Display for NasooneError {
@@ -155,13 +182,14 @@ impl Display for NasooneError {
             NasooneError::InvalidOutputPath(s) => write!(f, "Invalid output path: {}", s),
             NasooneError::UnsetCapture => write!(f, "Capture is not set"),
             NasooneError::UnsetOutput => write!(f, "Output is not set"),
+            NasooneError::InvalidTimeout => write!(f, "Invalid timeout"),
+            NasooneError::CaptureOver => write!(f, "Capture is over"),
         }
     }
 }
 
 impl Error for NasooneError {}
 
-// Struct PacketData
 #[derive(Clone, Eq, PartialEq)]
 struct PacketData {
     timestamp_ms: u64,
@@ -172,7 +200,9 @@ struct PacketData {
 /// A struct for capturing network traffic.
 pub struct Nasoone {
     /// The state of the capture.
-    state: Arc<(Condvar, Mutex<NasooneState>)>,
+    state: NasooneState,
+    /// The channel sender for sending the state change to the producer thread.
+    tx_main_prod: Option<Sender<Command>>,
     /// The periodical timeout after which the output file is updated.
     timeout: u32,
     /// The pcap capture.
@@ -180,7 +210,7 @@ pub struct Nasoone {
     /// The path to the output file.
     output: Option<File>,
     /// Producer thread handle.
-    producer_handle: Option<thread::JoinHandle<usize>>,
+    producer_handle: Option<thread::JoinHandle<Result<Stat, pcap::Error>>>,
     /// Parser threads handles.
     parser_handles: Vec<thread::JoinHandle<()>>,
     /// Writer thread handle.
@@ -190,7 +220,8 @@ pub struct Nasoone {
 impl Nasoone {
     pub fn new() -> Self {
         Self {
-            state: Arc::new((Condvar::new(), Mutex::new(NasooneState::Initial))),
+            state: NasooneState::Initial,
+            tx_main_prod: None,
             timeout: 1,
             capture: None,
             output: None,
@@ -201,12 +232,13 @@ impl Nasoone {
     }
     /// Set the capture from a network interface.
     pub fn set_capture_device(&mut self, device: &str) -> Result<(), NasooneError> {
-        match *self.state.1.lock().unwrap() {
+        match self.state {
             NasooneState::Initial => {
                 let capture = Capture::from_device(device).map_err(NasooneError::PcapError)?;
                 let capture = capture
                     .promisc(true)
                     .immediate_mode(true)
+                    .timeout(200)
                     .open()
                     .map_err(NasooneError::PcapError)?;
                 self.capture = Some(NasooneCapture::FromDevice(capture));
@@ -219,7 +251,7 @@ impl Nasoone {
     }
     /// Set the capture from a pcap file.
     pub fn set_capture_file(&mut self, file: &str) -> Result<(), NasooneError> {
-        match *self.state.1.lock().unwrap() {
+        match self.state {
             NasooneState::Initial => {
                 let capture = Capture::from_file(file).map_err(NasooneError::PcapError)?;
                 self.capture = Some(NasooneCapture::FromFile(capture));
@@ -232,7 +264,10 @@ impl Nasoone {
     }
     /// Set the update timeout.
     pub fn set_timeout(&mut self, timeout: u32) -> Result<(), NasooneError> {
-        match *self.state.1.lock().unwrap() {
+        if timeout == 0 {
+            return Err(NasooneError::InvalidTimeout);
+        }
+        match self.state {
             NasooneState::Initial => {
                 self.timeout = timeout;
                 Ok(())
@@ -246,7 +281,7 @@ impl Nasoone {
     /// The filter is a [BPF](https://biot.com/capstats/bpf.html) string that is passed to pcap.
     /// Multiple calls to this function will overwrite the previous filter.
     pub fn set_filter(&mut self, filter: &str) -> Result<(), NasooneError> {
-        match *self.state.1.lock().unwrap() {
+        match self.state {
             NasooneState::Initial => match self.capture {
                 Some(NasooneCapture::FromDevice(ref mut capture)) => {
                     capture
@@ -269,7 +304,7 @@ impl Nasoone {
     }
     /// Set the output file.
     pub fn set_output(&mut self, output_file: &str) -> Result<(), NasooneError> {
-        match *self.state.1.lock().unwrap() {
+        match self.state {
             NasooneState::Initial => {
                 let path = Path::new(output_file);
                 if path.exists() {
@@ -300,8 +335,7 @@ impl Nasoone {
 
     /// Start the capture.
     pub fn start(&mut self) -> Result<(), NasooneError> {
-        let mut state = self.state.1.lock().unwrap();
-        match *state {
+        match self.state {
             NasooneState::Initial => {
                 // Create all the threads and start the capture.
 
@@ -312,13 +346,14 @@ impl Nasoone {
                     return Err(NasooneError::UnsetOutput);
                 }
 
+                let (tx_main_prod, rx_main_prod) = crossbeam_channel::unbounded();
                 let (tx_prod_parser, rx_prod_parser) = crossbeam_channel::unbounded();
                 let (tx_parser_writer, rx_parser_writer) = crossbeam_channel::unbounded();
 
                 let capture = self.capture.take().unwrap();
-                let state_c = self.state.clone();
+                self.tx_main_prod = Some(tx_main_prod);
                 self.producer_handle = Some(thread::spawn(move || {
-                    producer_task(capture, tx_prod_parser, state_c)
+                    producer_task(capture, tx_prod_parser, rx_main_prod)
                 }));
 
                 let num_cpus = num_cpus::get();
@@ -338,7 +373,7 @@ impl Nasoone {
                     writer_task(rx_parser_writer, &mut output, timeout);
                 }));
 
-                *state = NasooneState::Running;
+                self.state = NasooneState::Running;
                 Ok(())
             }
             _ => Err(NasooneError::InvalidState(
@@ -349,12 +384,13 @@ impl Nasoone {
 
     /// Pause the capture if it is running.
     pub fn pause(&mut self) -> Result<(), NasooneError> {
-        let mut state = self.state.1.lock().unwrap();
-        match *state {
+        match self.state {
             NasooneState::Running => {
-                *state = NasooneState::Paused;
-                self.state.0.notify_one();
-                Ok(())
+                self.state = NasooneState::Paused;
+                match self.tx_main_prod.as_ref().unwrap().send(Command::Pause) {
+                    Ok(_) => Ok(()),
+                    Err(_) => Err(NasooneError::CaptureOver),
+                }
             }
             _ => Err(NasooneError::InvalidState(
                 "Nasoone is not running".to_string(),
@@ -364,12 +400,13 @@ impl Nasoone {
 
     /// Resume the capture if it is paused.
     pub fn resume(&mut self) -> Result<(), NasooneError> {
-        let mut state = self.state.1.lock().unwrap();
-        match *state {
+        match self.state {
             NasooneState::Paused => {
-                *state = NasooneState::Running;
-                self.state.0.notify_one();
-                Ok(())
+                self.state = NasooneState::Running;
+                match self.tx_main_prod.as_ref().unwrap().send(Command::Resume) {
+                    Ok(_) => Ok(()),
+                    Err(_) => Err(NasooneError::CaptureOver),
+                }
             }
             _ => Err(NasooneError::InvalidState(
                 "Nasoone is not running".to_string(),
@@ -379,19 +416,22 @@ impl Nasoone {
 
     /// Stop the capture if it is running or paused.
     /// It will wait for the threads to finish.
-    pub fn stop(&mut self) -> Result<(), NasooneError> {
-        let mut state = self.state.1.lock().unwrap();
-        match *state {
-            NasooneState::Running | NasooneState::Paused => {
-                *state = NasooneState::Stopped;
-                drop(state);
-                self.state.0.notify_one();
-                self.writer_handle.take().unwrap().join().unwrap();
-                self.producer_handle.take().unwrap().join().unwrap();
+    /// Return the statistics of the capture, only if the capture is from a network interface.
+    /// Otherwise, it will return None.
+    pub fn stop(&mut self) -> Result<Option<NasooneStats>, NasooneError> {
+        match self.state {
+            NasooneState::Running | NasooneState::Paused | NasooneState::Finished => {
+                self.state = NasooneState::Stopped;
+                let _ = self.tx_main_prod.as_ref().unwrap().send(Command::Stop); // ignore a possible error that would mean that the producer thread is already stopped
+                let stat = self.producer_handle.take().unwrap().join().unwrap();
                 for handle in self.parser_handles.drain(..) {
                     handle.join().unwrap();
                 }
-                Ok(())
+                self.writer_handle.take().unwrap().join().unwrap();
+                if stat.is_err() {
+                    return Ok(None);
+                }
+                Ok(Some(NasooneStats::from(stat.unwrap())))
             }
             _ => Err(NasooneError::InvalidState(
                 "Nasoone is not running".to_string(),
@@ -400,29 +440,36 @@ impl Nasoone {
     }
 
     /// Get the current state of the capture.
-    pub fn get_state(&self) -> NasooneState {
-        match *self.state.1.lock().unwrap() {
-            NasooneState::Initial => NasooneState::Initial,
-            NasooneState::Running => NasooneState::Running,
-            NasooneState::Paused => NasooneState::Paused,
-            NasooneState::Stopped => NasooneState::Stopped,
+    pub fn get_state(&mut self) -> NasooneState {
+        // control if the capture has finished by itself
+        if self.producer_handle.as_ref().is_some()
+            && self.producer_handle.as_ref().unwrap().is_finished()
+        {
+            self.state = NasooneState::Finished;
         }
+        self.state.clone()
     }
 
     /// Get the list of available network interfaces.
     pub fn list_devices() -> Result<Vec<NetworkInterface>, NasooneError> {
-        let devices = Device::list().map_err(NasooneError::PcapError)?;
-        let devices = devices
+        let devices = Device::list()
+            .map_err(NasooneError::PcapError)?
             .into_iter()
             .map(|d| NetworkInterface::new(d.name, d.desc))
             .collect();
         Ok(devices)
     }
+
+    /// Get the name of the default network interface.
+    pub fn get_default_device_name() -> Result<String, NasooneError> {
+        let device = Device::lookup().map_err(NasooneError::PcapError)?;
+        Ok(device.name)
+    }
 }
 
 impl Drop for Nasoone {
     fn drop(&mut self) {
-        if self.get_state() != NasooneState::Stopped {
+        if self.state != NasooneState::Stopped {
             // try to stop the capture
             let _ = self.stop();
         }

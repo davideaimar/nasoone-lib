@@ -1,4 +1,4 @@
-use crate::{AddressType, PacketData, ReportKey, ReportValue};
+use crate::{PacketData, ReportKey, ReportValue};
 use crossbeam_channel::{select, tick, Receiver, Sender};
 use etherparse::PacketHeaders;
 use std::collections::{HashMap, HashSet};
@@ -35,37 +35,24 @@ pub(crate) fn parser_task(
                                     etherparse::IpHeader::Version4(value, ..) => (IpAddr::V4(Ipv4Addr::from(value.source)), IpAddr::V4(Ipv4Addr::from(value.destination))),
                                     etherparse::IpHeader::Version6(value, ..) => (IpAddr::V6(Ipv6Addr::from(value.source)), IpAddr::V6(Ipv6Addr::from(value.destination))),
                                 };
-                                let key_src = ReportKey {
-                                    ip: ip_info.0,
-                                    port: ports.0,
-                                    dir: AddressType::Src,
+                                let key = ReportKey {
+                                    source_ip: ip_info.0,
+                                    source_port: ports.0,
+                                    destination_ip: ip_info.1,
+                                    destination_port: ports.1,
                                 };
-                                let mut info = map.entry(key_src).or_insert(ReportValue {
+                                let mut info = map.entry(key).or_insert(ReportValue {
                                     protocols: HashSet::new(),
                                     first_timestamp_ms: ts,
                                     last_timestamp_ms: ts,
                                     bytes: 0,
+                                    packets_count: 0,
                                 });
                                 info.protocols.insert(ports.2);
                                 info.bytes += bytes as u64;
                                 info.last_timestamp_ms = info.last_timestamp_ms.max(ts);
                                 info.first_timestamp_ms = info.first_timestamp_ms.min(ts);
-                                let key_dest = ReportKey {
-                                    ip: ip_info.1,
-                                    port: ports.1,
-                                    dir: AddressType::Dest,
-                                };
-                                let mut info = map.entry(key_dest).or_insert(ReportValue {
-                                    protocols: HashSet::new(),
-                                    first_timestamp_ms: ts,
-                                    last_timestamp_ms: ts,
-                                    bytes: 0,
-                                });
-                                info.protocols.insert(ports.2);
-                                info.bytes += bytes as u64;
-                                info.last_timestamp_ms = info.last_timestamp_ms.max(ts);
-                                info.first_timestamp_ms = info.first_timestamp_ms.min(ts);
-
+                                info.packets_count += 1;
                             }
                         }
                     }
