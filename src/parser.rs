@@ -1,4 +1,4 @@
-use crate::{AddressType, PacketData, ReportKey, ReportValue};
+use crate::{PacketData, ReportKey, ReportValue};
 use crossbeam_channel::{select, tick, Receiver, Sender};
 use etherparse::PacketHeaders;
 use std::collections::{HashMap, HashSet};

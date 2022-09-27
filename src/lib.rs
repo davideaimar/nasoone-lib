@@ -18,21 +18,6 @@ use std::net::IpAddr;
 use std::path::Path;
 use std::thread;
 
-#[derive(Hash, Eq, PartialEq, Debug)]
-enum AddressType {
-    Src,
-    Dest,
-}
-
-impl Display for AddressType {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        match self {
-            AddressType::Src => write!(f, "src"),
-            AddressType::Dest => write!(f, "dest"),
-        }
-    }
-}
-
 enum Command {
     Stop,
     Pause,
@@ -53,7 +38,11 @@ impl Display for ReportKey {
         let source_port = self.source_port.clone().to_string();
         let dest_ip = self.destination_ip;
         let dest_port = self.destination_port;
-        write!(f, "{}; {}; {}; {}", source_ip, source_port, dest_ip, dest_port)
+        write!(
+            f,
+            "{}; {}; {}; {}",
+            source_ip, source_port, dest_ip, dest_port
+        )
     }
 }
 
