@@ -11,7 +11,7 @@ fn it_compiles() {
     //naso.set_filter("ip host 192.168.1.1").unwrap();
     naso.start().unwrap();
     assert!(Nasoone::list_devices().is_ok());
-    remove_file("./tests/output/test1").unwrap();
+    //remove_file("./tests/output/test1").unwrap();
 }
 
 #[test]
@@ -207,4 +207,22 @@ fn test_stop_duration() {
         None => {}
     }
     let _ = remove_file("./tests/output/test7");
+}
+
+#[test]
+fn test_pcap_file_1() {
+    let mut naso = Nasoone::new();
+    naso.set_capture_file("./tests/data/wireshark/wireshark_1.pcap")
+        .unwrap();
+    naso.set_output("./tests/output/test8").unwrap();
+    naso.start().unwrap();
+}
+
+#[test]
+fn test_pcap_file_2() {
+    let mut naso = Nasoone::new();
+    naso.set_capture_file("./tests/data/wireshark/wireshark_3.pcap")
+        .unwrap();
+    naso.set_output("./tests/output/test9").unwrap();
+    naso.start().unwrap();
 }
