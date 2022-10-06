@@ -55,12 +55,6 @@ pub(crate) fn producer_task(
         // or if no packet satisfies the filter. The timeout is set when the capture is built (200ms).
         let next_packet = capture.next();
 
-        packet_cnt += 1;
-
-        if packet_cnt % 10 == 0 {
-            *total_packets.lock().unwrap() = packet_cnt;
-        }
-
         if next_packet.is_err() {
             match next_packet.err().unwrap() {
                 Error::TimeoutExpired => {
@@ -79,6 +73,11 @@ pub(crate) fn producer_task(
         }
 
         if !ignore_packets {
+            packet_cnt += 1;
+            // update the total packets counter every 10 packets
+            if packet_cnt % 10 == 0 {
+                *total_packets.lock().unwrap() = packet_cnt;
+            }
             let packet = next_packet.unwrap();
             // tv_sec is time in sec, tv_usec is time in microsecond. Result is in millisecond.
             let timestamp_ms =
