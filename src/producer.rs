@@ -1,25 +1,31 @@
 use crate::{Command, NasooneCapture, PacketData};
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use pcap::{Error, Stat};
+use std::sync::{Arc, Mutex};
 
-/// The producer thread. Its task is to receive packets from pcap, clone the data and send it to a
-/// parser thread that is available. At every packet received, the producer also check the state:
-///  - `NasooneState::Stopped` will stop the capture, dropping the Sender to the parsers will cause the
-///    parser threads to stop.
-/// - `NasooneState::Paused` will pause the capture.
-/// - `NasooneState::Running` or `NasooneState::Initial` will continue the capture.
+// The producer thread. Its task is to receive packets from pcap, clone the data and send it to a
+// parser thread that is available. At every packet received, the producer also check the state:
+//  - `NasooneState::Stopped` will stop the capture, dropping the Sender to the parsers will cause the
+//    parser threads to stop.
+// - `NasooneState::Paused` will pause the capture.
+// - `NasooneState::Running` or `NasooneState::Initial` will continue the capture.
 pub(crate) fn producer_task(
     mut capture: NasooneCapture,
     tx_prod_parser: Sender<PacketData>,
     rx_main_prod: Receiver<Command>,
+    total_packets: Arc<Mutex<usize>>,
 ) -> Result<Stat, Error> {
     let mut ignore_packets = false;
 
     let from_file = matches!(capture, NasooneCapture::FromFile(_));
 
+    let mut packet_cnt: usize = 0;
+
     loop {
+        // after every packet received, check if there is a command from the main thread
+
         if from_file && ignore_packets {
-            // blocking wait if the capture is from a file and we are ignoring packets,
+            // BLOCKING wait if the capture is from a file and we are ignoring packets,
             // because capturing from a file we don't want to loose packets
             match rx_main_prod.recv() {
                 Ok(Command::Stop) => break,
@@ -28,7 +34,7 @@ pub(crate) fn producer_task(
                 Err(_) => break,
             }
         } else {
-            // non-blocking wait if the capture is from a device
+            // NON-BLOCKING wait if the capture is from a device
             match rx_main_prod.try_recv() {
                 Ok(Command::Stop) => break,
                 Ok(Command::Pause) => ignore_packets = true,
@@ -46,8 +52,14 @@ pub(crate) fn producer_task(
         }
 
         // receive next packet (blocking), could exit after a timeout if no packet is received
-        // or if no packet satisfies the filter. The timeout is set when the capture is built.
+        // or if no packet satisfies the filter. The timeout is set when the capture is built (200ms).
         let next_packet = capture.next();
+
+        packet_cnt += 1;
+
+        if packet_cnt % 10 == 0 {
+            *total_packets.lock().unwrap() = packet_cnt;
+        }
 
         if next_packet.is_err() {
             match next_packet.err().unwrap() {

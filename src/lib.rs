@@ -1,5 +1,43 @@
 //! Nasoone-lib is a library for the NASOONE project.
-//! It provides a struct for analyzing network traffic using [pcap](https://docs.rs/pcap/latest/pcap/index.html).
+//!
+//! It provides an easy way for analyzing network traffic using pcap.
+//!
+//! The output is a CSV file with the following columns separated by a semicolon:
+//! - Source IP
+//! - Source port
+//! - Destination IP
+//! - Destination port
+//! - List of observed protocols
+//! - Timestamp of the first packet
+//! - Timestamp of the last packet
+//! - Number of bytes
+//! - Number of packets
+//!
+//! Example usage:
+//! ```
+//! use std::thread::sleep;
+//! use std::time::Duration;
+//! use nasoone_lib::Nasoone;
+//!
+//! let mut naso = Nasoone::new();
+//! // set the capture device from a physical interface
+//! naso.set_capture_device("en0").unwrap();
+//! naso.set_output("./report.csv").unwrap();
+//! // set the timeout between report updates (in seconds)
+//! naso.set_timeout(1).unwrap();
+//! // start the capture (non-blocking)
+//! naso.start().unwrap();
+//! sleep(Duration::from_secs(10));
+//! // pause the capture
+//! naso.pause().unwrap();
+//! sleep(Duration::from_secs(2));
+//! // resume the capture
+//! naso.resume().unwrap();
+//! sleep(Duration::from_secs(10));
+//! // stop the capture and get the stats
+//! let stats = naso.stop().unwrap();
+//! println!("{:?}", stats);
+//! ```
 
 mod parser;
 mod producer;
@@ -16,6 +54,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::fs::File;
 use std::net::IpAddr;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 #[derive(Hash, Eq, PartialEq, Debug)]
@@ -103,7 +142,7 @@ pub enum NasooneState {
 }
 
 #[derive(Debug)]
-/// Represents the pcap statistics about a capture (from https://docs.rs/pcap/0.9.2/pcap/index.html.)
+/// Represents the pcap statistics about a capture (from <https://docs.rs/pcap/latest/pcap/index.html>.)
 pub struct NasooneStats {
     /// Number of packets received
     pub received: u32,
@@ -223,6 +262,8 @@ pub struct Nasoone {
     parser_handles: Vec<thread::JoinHandle<()>>,
     /// Writer thread handle.
     writer_handle: Option<thread::JoinHandle<()>>,
+    /// the amount of packets captured in the current session.
+    total_packets: Arc<Mutex<usize>>,
 }
 
 impl Nasoone {
@@ -236,9 +277,28 @@ impl Nasoone {
             producer_handle: None,
             parser_handles: Vec::new(),
             writer_handle: None,
+            total_packets: Arc::new(Mutex::new(0)),
         }
     }
+
     /// Set the capture from a network interface.
+    /// It returns an error in the following cases:
+    /// - Nasoone is not in the Initial state
+    /// - the interface name is not valid
+    /// - the capture cannot be activated
+    ///
+    /// # Arguments
+    ///
+    /// * `device` - A string slice that holds the name of the interface to capture from.
+    ///
+    /// # Examples
+    ///
+    /// Create a nasoone instance and set the capture from the interface "en0"
+    /// ```
+    /// use nasoone_lib::Nasoone;
+    /// let mut nasoone = Nasoone::new();
+    /// let _ = nasoone.set_capture_device("en0");
+    /// ```
     pub fn set_capture_device(&mut self, device: &str) -> Result<(), NasooneError> {
         match self.state {
             NasooneState::Initial => {
@@ -257,7 +317,25 @@ impl Nasoone {
             )),
         }
     }
+
     /// Set the capture from a pcap file.
+    ///
+    /// It returns an error in the following cases:
+    /// - Nasoone is not in the Initial state
+    /// - the capture file is not valid
+    ///
+    /// # Arguments
+    ///
+    /// * `file` - A string slice with the file path.
+    ///
+    /// # Examples
+    ///
+    /// Create a nasoone instance and set the capture from the file "capture.pcap":
+    /// ```
+    /// use nasoone_lib::Nasoone;
+    /// let mut nasoone = Nasoone::new();
+    /// let  _ = nasoone.set_capture_file("./capture.pcap");
+    /// ```
     pub fn set_capture_file(&mut self, file: &str) -> Result<(), NasooneError> {
         match self.state {
             NasooneState::Initial => {
@@ -270,15 +348,37 @@ impl Nasoone {
             )),
         }
     }
-    /// Set the update timeout.
+
+    /// Set the timeout in seconds after which the output file is updated.
+    ///
+    /// The timeout must be greater than 0, it specifies the periodical update of the output file.
+    /// So, if the timeout is 1, the output file is updated every second.
+    ///
+    /// It returns an error in the following cases:
+    /// - Nasoone is not in the Initial state
+    /// - the timeout is 0
+    ///
+    /// # Arguments
+    ///
+    /// * `timeout` - The timeout in seconds.
+    ///
+    /// # Examples
+    ///
+    /// Create a nasoone instance and set the timeout to 1 second:
+    /// ```
+    /// use nasoone_lib::Nasoone;
+    /// let mut nasoone = Nasoone::new();
+    /// nasoone.set_timeout(1).expect("");
+    /// ```
     pub fn set_timeout(&mut self, timeout: u32) -> Result<(), NasooneError> {
-        if timeout == 0 {
-            return Err(NasooneError::InvalidTimeout);
-        }
         match self.state {
             NasooneState::Initial => {
-                self.timeout = timeout;
-                Ok(())
+                if timeout == 0 {
+                    Err(NasooneError::InvalidTimeout)
+                } else {
+                    self.timeout = timeout;
+                    Ok(())
+                }
             }
             _ => Err(NasooneError::InvalidState(
                 "Nasoone is not in initial state".to_string(),
@@ -288,6 +388,25 @@ impl Nasoone {
     /// Set the filter for the capture.
     /// The filter is a [BPF](https://biot.com/capstats/bpf.html) string that is passed to pcap.
     /// Multiple calls to this function will overwrite the previous filter.
+    ///
+    /// It returns an error in the following cases:
+    /// - Nasoone is not in the Initial state
+    /// - The capture is not set
+    /// - the filter is not valid
+    ///
+    /// # Arguments
+    ///
+    /// * `filter` - The filter string in BPF syntax.
+    ///
+    /// # Examples
+    ///
+    /// create a nasoone instance and set filter to accept only packets with source port 80 to 88:
+    /// ```
+    /// use nasoone_lib::Nasoone;
+    /// let mut nasoone = Nasoone::new();
+    /// nasoone.set_capture_device("en0").expect("");
+    /// nasoone.set_filter("src portrange 80-88").expect("");
+    /// ```
     pub fn set_filter(&mut self, filter: &str) -> Result<(), NasooneError> {
         match self.state {
             NasooneState::Initial => match self.capture {
@@ -311,6 +430,26 @@ impl Nasoone {
         }
     }
     /// Set the output file.
+    /// The output file is a CSV textual report of the capture.
+    ///
+    /// It returns an error in the following cases:
+    /// - Nasoone is not in the Initial state
+    /// - the file already exists
+    /// - the target directory does not exist
+    /// - the file cannot be created
+    ///
+    /// # Arguments
+    ///
+    /// * `output_file` - The path of the output file.
+    ///
+    /// # Examples
+    ///
+    /// create a nasoone instance and set the output file to "./output.csv":
+    /// ```
+    /// use nasoone_lib::Nasoone;
+    /// let mut nasoone = Nasoone::new();
+    /// nasoone.set_output("./output.csv").expect("");
+    /// ```
     pub fn set_output(&mut self, output_file: &str) -> Result<(), NasooneError> {
         match self.state {
             NasooneState::Initial => {
@@ -322,7 +461,7 @@ impl Nasoone {
                 }
                 if path.parent().is_some() && !path.parent().unwrap().exists() {
                     return Err(NasooneError::InvalidOutputPath(
-                        "Parent directory of output file does not exist".to_string(),
+                        "Target directory does not exist".to_string(),
                     ));
                 }
                 match File::create(path) {
@@ -341,7 +480,23 @@ impl Nasoone {
         }
     }
 
-    /// Start the capture.
+    /// Start analyzing the network traffic.
+    ///
+    /// It returns an error in the following cases:
+    /// - Nasoone is not in the Initial state
+    /// - the capture is not set
+    /// - the output is not set
+    ///
+    /// # Examples
+    ///
+    /// create a nasoone instance, set the capture and the output file and start the analysis:
+    /// ```
+    /// use nasoone_lib::Nasoone;
+    /// let mut nasoone = Nasoone::new();
+    /// nasoone.set_capture_device("en0").expect("");
+    /// nasoone.set_output("./output.csv").expect("");
+    /// nasoone.start().expect("");
+    /// ```
     pub fn start(&mut self) -> Result<(), NasooneError> {
         match self.state {
             NasooneState::Initial => {
@@ -360,8 +515,9 @@ impl Nasoone {
 
                 let capture = self.capture.take().unwrap();
                 self.tx_main_prod = Some(tx_main_prod);
+                let total_packets = self.total_packets.clone();
                 self.producer_handle = Some(thread::spawn(move || {
-                    producer_task(capture, tx_prod_parser, rx_main_prod)
+                    producer_task(capture, tx_prod_parser, rx_main_prod, total_packets)
                 }));
 
                 let num_cpus = num_cpus::get();
@@ -385,12 +541,33 @@ impl Nasoone {
                 Ok(())
             }
             _ => Err(NasooneError::InvalidState(
-                "Nasoone is already running".to_string(),
+                "Nasoone is not in initial state".to_string(),
             )),
         }
     }
 
-    /// Pause the capture if it is running.
+    /// Pause the analysis of the network traffic.
+    ///
+    /// If the capture is set from a file, the analysis stop reading the file.
+    /// Otherwise, it continues to receive packets from the network interface but it does not analyze them.
+    ///
+    /// It returns an error in the following cases:
+    /// - Nasoone is not in the Running state
+    /// - the capture is from a file and the file is over (the analysis is already finished)
+    ///
+    /// # Examples
+    ///
+    /// create a nasoone instance, start the analysis and then pause it:
+    /// ```
+    /// use std::thread::sleep;
+    /// use nasoone_lib::Nasoone;
+    /// let mut nasoone = Nasoone::new();
+    /// nasoone.set_capture_device("en0").expect("");
+    /// nasoone.set_output("./output.csv").expect("");
+    /// nasoone.start().expect("");
+    /// sleep(std::time::Duration::from_secs(5));
+    /// nasoone.pause().expect("");
+    /// ```
     pub fn pause(&mut self) -> Result<(), NasooneError> {
         match self.state {
             NasooneState::Running => {
@@ -406,7 +583,24 @@ impl Nasoone {
         }
     }
 
-    /// Resume the capture if it is paused.
+    /// Resume the analysis if it was paused.
+    ///
+    /// It returns an error in the following cases:
+    /// - Nasoone is not in the Paused state
+    /// - the capture is from a file and the file is over (the analysis is already finished)
+    ///
+    /// # Examples
+    ///
+    /// create a nasoone instance, start the analysis, pause it and then resume it:
+    /// ```
+    /// use nasoone_lib::Nasoone;
+    /// let mut nasoone = Nasoone::new();
+    /// nasoone.set_capture_device("en0").expect("");
+    /// nasoone.set_output("./output.csv").expect("");
+    /// nasoone.start().expect("");
+    /// nasoone.pause().expect("");
+    /// nasoone.resume().expect("");
+    /// ```
     pub fn resume(&mut self) -> Result<(), NasooneError> {
         match self.state {
             NasooneState::Paused => {
@@ -417,15 +611,31 @@ impl Nasoone {
                 }
             }
             _ => Err(NasooneError::InvalidState(
-                "Nasoone is not running".to_string(),
+                "Nasoone is not paused".to_string(),
             )),
         }
     }
 
-    /// Stop the capture if it is running or paused.
-    /// It will wait for the threads to finish.
-    /// Return the statistics of the capture, only if the capture is from a network interface.
+    /// Stop the capture if it is running or paused. It will wait for the threads to finish,
+    /// so it could take some time (up to 200-250ms).
+    ///
+    /// It returns the statistics of the capture only if the capture is from a network interface.
     /// Otherwise, it will return None.
+    ///
+    /// It returns an error in the following cases:
+    /// - Nasoone is not in the Running, Finished or Paused state
+    ///
+    /// # Examples
+    ///
+    /// create a nasoone instance, start the analysis and then stop it:
+    /// ```
+    /// use nasoone_lib::Nasoone;
+    /// let mut nasoone = Nasoone::new();
+    /// nasoone.set_capture_device("en0").expect("");
+    /// nasoone.set_output("./output.csv").expect("");
+    /// nasoone.start().expect("");
+    /// let stats = nasoone.stop().expect("");
+    /// ```
     pub fn stop(&mut self) -> Result<Option<NasooneStats>, NasooneError> {
         match self.state {
             NasooneState::Running | NasooneState::Paused | NasooneState::Finished => {
@@ -447,7 +657,39 @@ impl Nasoone {
         }
     }
 
+    /// Get the total amount of packet received by the capture.
+    ///
+    /// # Examples
+    ///
+    /// Create a nasoone instance, start the analysis and then get the total amount of packet received:
+    /// ```
+    /// use std::thread::sleep;
+    /// use nasoone_lib::{Nasoone, NasooneState};
+    /// let mut nasoone = Nasoone::new();
+    /// nasoone.set_capture_device("en0").expect("");
+    /// nasoone.set_output("./output.csv").expect("");
+    /// nasoone.start().expect("");
+    /// sleep(std::time::Duration::from_secs(5));
+    /// assert!(nasoone.get_total_packets() > 0);
+    /// ```
+    pub fn get_total_packets(&mut self) -> usize {
+        *self.total_packets.lock().unwrap()
+    }
+
     /// Get the current state of the capture.
+    ///
+    /// # Examples
+    ///
+    /// Create a nasoone instance, start the analysis, pause it and ask for the state:
+    /// ```
+    /// use nasoone_lib::{Nasoone, NasooneState};
+    /// let mut nasoone = Nasoone::new();
+    /// nasoone.set_capture_device("en0").expect("");
+    /// nasoone.set_output("./output.csv").expect("");
+    /// nasoone.start().expect("");
+    /// nasoone.pause().expect("");
+    /// assert_eq!(nasoone.get_state(), NasooneState::Paused);
+    /// ```
     pub fn get_state(&mut self) -> NasooneState {
         // control if the capture has finished by itself
         if self.producer_handle.as_ref().is_some()
@@ -459,6 +701,14 @@ impl Nasoone {
     }
 
     /// Get the list of available network interfaces.
+    ///
+    /// It could return underlined errors from the pcap library.
+    ///
+    /// # Examples
+    /// ```
+    /// use nasoone_lib::Nasoone;
+    /// let interfaces = Nasoone::list_devices().expect("");
+    /// ```
     pub fn list_devices() -> Result<Vec<NetworkInterface>, NasooneError> {
         let devices = Device::list()
             .map_err(NasooneError::PcapError)?
