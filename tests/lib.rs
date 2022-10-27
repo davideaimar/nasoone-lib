@@ -105,6 +105,38 @@ fn test_pause_stop() {
 
 #[test]
 #[ignore]
+fn test_total_packets_with_interface() {
+    let _ = remove_file("./tests/output/test_total_packets_with_interface");
+    let mut naso = Nasoone::new();
+    naso.set_capture_device("en3").unwrap();
+    naso.set_output("./tests/output/test_total_packets_with_interface")
+        .unwrap();
+    naso.start().unwrap();
+    for _ in 0..10 {
+        sleep(Duration::from_secs(1));
+        println!("{} packets", naso.get_total_packets());
+    }
+    let _ = naso.stop().unwrap();
+    remove_file("./tests/output/test_total_packets_with_interface").unwrap();
+}
+
+#[test]
+#[ignore]
+fn test_total_packets_with_file() {
+    let _ = remove_file("./tests/output/test_total_packets_with_file");
+    let mut naso = Nasoone::new();
+    naso.set_capture_file("./tests/data/http.pcap").unwrap();
+    naso.set_output("./tests/output/test_total_packets_with_file")
+        .unwrap();
+    naso.start().unwrap();
+    sleep(Duration::from_secs(1));
+    let _ = naso.stop().unwrap();
+    assert!(naso.get_total_packets() > 0);
+    remove_file("./tests/output/test_total_packets_with_file").unwrap();
+}
+
+#[test]
+#[ignore]
 fn test_device_list() {
     let _ = remove_file("./tests/output/test_device_list");
     let devices = Nasoone::list_devices().unwrap();
