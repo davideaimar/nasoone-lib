@@ -11,6 +11,8 @@ pub(crate) fn parser_task(
     timeout_s: u32,
 ) {
     // the ticker will send a message every `timeout` seconds
+    // it is used to send the intermediate data to the writer thread with a frequency 4 times higher
+    // than the timeout of the writer.
     let ticker = tick(Duration::from_millis((timeout_s * 1000 / 4) as u64));
     let mut map: Option<HashMap<ReportKey, ReportValue>> = Some(HashMap::new());
     loop {
