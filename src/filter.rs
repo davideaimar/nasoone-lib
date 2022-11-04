@@ -82,9 +82,6 @@ impl Filter {
         self.dst_hosts.push(s);
         self.hosts.clear();
     }
-    pub fn remove_host(&mut self, ) {
-
-    }
     pub fn clear_host(&mut self) {
         self.hosts.clear();
     }
