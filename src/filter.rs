@@ -212,27 +212,13 @@ impl fmt::Display for Filter {
         }
 
         //PROTOCOLS
-        if self.http {
-            output += "http and ";
-        }
-        if self.tcp {
-            output += "http and ";
-        }
-        if self.ftp {
-            output += "http and ";
-        }
-        if self.udp {
-            output += "udp and ";
-        }
-        if self.dns {
-            output += "dns and ";
-        }
-        if self.icmp {
-            output += "icmp and ";
-        }
-        if self.smtp {
-            output += "smtp and ";
-        }
+        if self.http {output += "http and ";}
+        if self.tcp {output += "http and ";}
+        if self.ftp {output += "http and ";}
+        if self.udp {output += "udp and ";}
+        if self.dns {output += "dns and ";}
+        if self.icmp {output += "icmp and ";}
+        if self.smtp {output += "smtp and ";}
 
         let output = &output[0..output.len() - 5]; //Removes the trailing " and "
         write!(f, "{}", output)
