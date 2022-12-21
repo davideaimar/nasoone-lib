@@ -62,16 +62,17 @@ fn filters() {
         .clear_dst_host()
         .clear_host()
         .add_host(IpAddr::V4("192.168.1.1".parse().unwrap()), false)
-        .add_dst_host(IpAddr::V4("192.168.1.1".parse().unwrap()), false)
-        .add_src_host(IpAddr::V4("192.168.1.1".parse().unwrap()), false)
-        .set_dns(true)
-        .set_http(true)
-        .set_smtp(true)
-        .set_tcp(true)
-        .set_udp(true)
-        .set_port(80)
-        .set_dst_port(80)
-        .set_src_port(80);
+        .add_host(IpAddr::V4("192.168.1.2".parse().unwrap()), true)
+        .add_dst_host(IpAddr::V4("224.0.0.251".parse().unwrap()), false)
+        .add_dst_host(IpAddr::V4("224.0.0.252".parse().unwrap()), true)
+        .add_src_host(IpAddr::V4("192.168.1.164".parse().unwrap()), false)
+        .add_src_host(IpAddr::V4("192.168.1.165".parse().unwrap()), true)
+        .add_port(80)
+        .add_dst_port(5353)
+        .add_dst_port(5354)
+        .add_src_port(5353)
+        .add_src_port(5354);
+    println!("{}", filter);
     let mut naso = Nasoone::new();
     naso.set_capture_file("./tests/data/http.pcap").unwrap();
     naso.set_filter(&filter).unwrap();
