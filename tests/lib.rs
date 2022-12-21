@@ -1,5 +1,6 @@
-use nasoone_lib::{Nasoone, NasooneError, NasooneState};
+use nasoone_lib::{Filter, Nasoone, NasooneError, NasooneState};
 use std::fs::remove_file;
+use std::net::IpAddr;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -44,13 +45,37 @@ fn list_devices() {
 }
 
 #[test]
-fn filters() {
+fn raw_filters() {
     let mut naso = Nasoone::new();
     naso.set_capture_file("./tests/data/http.pcap").unwrap();
-    naso.set_filter("tcp port 80 and (((ip[2:2] - ((ip[0]&0xf)<<2)) - ((tcp[12]&0xf0)>>2)) != 0)")
+    naso.set_raw_filter(
+        "tcp port 80 and (((ip[2:2] - ((ip[0]&0xf)<<2)) - ((tcp[12]&0xf0)>>2)) != 0)",
+    )
+    .unwrap();
+    naso.set_raw_filter("icmp[icmptype] != icmp-echo and icmp[icmptype] != icmp-echoreply")
         .unwrap();
-    naso.set_filter("icmp[icmptype] != icmp-echo and icmp[icmptype] != icmp-echoreply")
-        .unwrap();
+}
+
+#[test]
+fn filters() {
+    let filter = Filter::new()
+        .clear_dst_host()
+        .clear_host()
+        .add_host(IpAddr::V4("192.168.1.1".parse().unwrap()), false)
+        .add_host(IpAddr::V4("192.168.1.2".parse().unwrap()), true)
+        .add_dst_host(IpAddr::V4("224.0.0.251".parse().unwrap()), false)
+        .add_dst_host(IpAddr::V4("224.0.0.252".parse().unwrap()), true)
+        .add_src_host(IpAddr::V4("192.168.1.164".parse().unwrap()), false)
+        .add_src_host(IpAddr::V4("192.168.1.165".parse().unwrap()), true)
+        .add_port(80)
+        .add_dst_port(5353)
+        .add_dst_port(5354)
+        .add_src_port(5353)
+        .add_src_port(5354);
+    println!("{}", filter);
+    let mut naso = Nasoone::new();
+    naso.set_capture_file("./tests/data/http.pcap").unwrap();
+    naso.set_filter(&filter).unwrap();
 }
 
 #[test]
@@ -153,7 +178,7 @@ fn test_filter_stop() {
         .unwrap();
     naso.set_output("./tests/output/test5").unwrap();
     naso.set_timeout(10).unwrap();
-    naso.set_filter("host 1.2.3.4").unwrap();
+    naso.set_raw_filter("host 1.2.3.4").unwrap();
     naso.start().unwrap();
     sleep(Duration::from_secs(1));
     naso.stop().unwrap();
@@ -169,7 +194,7 @@ fn test_no_lost_packets() {
         .unwrap();
     naso.set_output("./tests/output/test6").unwrap();
     naso.set_timeout(10).unwrap();
-    naso.set_filter("host 1.2.3.4").unwrap();
+    naso.set_raw_filter("host 1.2.3.4").unwrap();
     naso.start().unwrap();
     sleep(Duration::from_secs(1));
     let start = Instant::now();

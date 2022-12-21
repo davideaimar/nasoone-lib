@@ -39,10 +39,12 @@
 //! println!("{:?}", stats);
 //! ```
 
+mod filter;
 mod parser;
 mod producer;
 mod writer;
 
+pub use crate::filter::Filter;
 use crate::parser::parser_task;
 use crate::producer::producer_task;
 use crate::writer::writer_task;
@@ -377,9 +379,9 @@ impl Nasoone {
             )),
         }
     }
-    /// Set the filter for the capture.
-    /// The filter is a [BPF](https://biot.com/capstats/bpf.html) string that is passed to pcap.
-    /// Multiple calls to this function will overwrite the previous filter.
+    /// Set the raw filter for the capture.
+    /// The raw filter is a [BPF](https://biot.com/capstats/bpf.html) string that is passed to pcap.
+    /// Multiple calls to this function or to set_filter will overwrite the previous filter.
     ///
     /// It returns an error in the following cases:
     /// - Nasoone is not in the Initial state
@@ -399,7 +401,7 @@ impl Nasoone {
     /// nasoone.set_capture_device("en0").expect("");
     /// nasoone.set_filter("src portrange 80-88").expect("");
     /// ```
-    pub fn set_filter(&mut self, filter: &str) -> Result<(), NasooneError> {
+    pub fn set_raw_filter(&mut self, filter: &str) -> Result<(), NasooneError> {
         match self.state {
             NasooneState::Initial => match self.capture {
                 Some(NasooneCapture::FromDevice(ref mut capture)) => {
@@ -411,6 +413,51 @@ impl Nasoone {
                 Some(NasooneCapture::FromFile(ref mut capture)) => {
                     capture
                         .filter(filter, true)
+                        .map_err(NasooneError::PcapError)?;
+                    Ok(())
+                }
+                None => Err(NasooneError::UnsetCapture),
+            },
+            _ => Err(NasooneError::InvalidState(
+                "Filters can be set only in initial state".to_string(),
+            )),
+        }
+    }
+    /// Set the filter for the capture.
+    /// The filter is a Filter struct that will be transformed in BPF and passed to pcap.
+    /// Multiple calls to this or set_raw_filter function will overwrite the previous filter.
+    ///
+    /// It returns an error in the following cases:
+    /// - Nasoone is not in the Initial state
+    /// - The capture is not set
+    ///
+    /// # Arguments
+    ///
+    /// * `filter` - The filter struct already setted up.
+    ///
+    /// # Examples
+    ///
+    /// create a nasoone instance and set filter to accept only packets with source port 80 to 88:
+    /// ```
+    /// use nasoone_lib::Nasoone;
+    /// use nasoone_lib::Filter;
+    /// let filter = Filter::new();
+    /// let mut nasoone = Nasoone::new();
+    /// nasoone.set_capture_device("en0").expect("");
+    /// nasoone.set_filter("src portrange 80-88").expect("");
+    /// ```
+    pub fn set_filter(&mut self, filter: &Filter) -> Result<(), NasooneError> {
+        match self.state {
+            NasooneState::Initial => match self.capture {
+                Some(NasooneCapture::FromDevice(ref mut capture)) => {
+                    capture
+                        .filter(&filter.to_string(), true)
+                        .map_err(NasooneError::PcapError)?;
+                    Ok(())
+                }
+                Some(NasooneCapture::FromFile(ref mut capture)) => {
+                    capture
+                        .filter(&filter.to_string(), true)
                         .map_err(NasooneError::PcapError)?;
                     Ok(())
                 }
