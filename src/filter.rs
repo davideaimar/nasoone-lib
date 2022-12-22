@@ -1,12 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 use std::net::IpAddr;
 
 pub struct Filter {
     //Filter by address
-    hosts: HashMap<IpAddr, bool>,
-    src_hosts: HashMap<IpAddr, bool>,
-    dst_hosts: HashMap<IpAddr, bool>,
+    hosts: HashSet<IpAddr>,
+    src_hosts: HashSet<IpAddr>,
+    dst_hosts: HashSet<IpAddr>,
 
     //Filter by protocol
     tcp: bool,
@@ -28,9 +28,9 @@ impl Filter {
     //Constructor
     pub fn new() -> Self {
         Filter {
-            hosts: HashMap::new(),
-            src_hosts: HashMap::new(),
-            dst_hosts: HashMap::new(),
+            hosts: HashSet::new(),
+            src_hosts: HashSet::new(),
+            dst_hosts: HashSet::new(),
 
             tcp: true,
             udp: true,
@@ -47,10 +47,8 @@ impl Filter {
     /// # Arguments
     ///
     /// * `host` - The ip address to add to the filter.
-    /// * `not` - If true, only packets that do not include the ip address will be captured.
-    ///
-    pub fn add_host(mut self, host: IpAddr, not: bool) -> Self {
-        self.hosts.insert(host, not);
+    pub fn add_host(mut self, host: IpAddr) -> Self {
+        self.hosts.insert(host);
         self.src_hosts.clear(); //host filter mutual exclusive with src and dst
         self.dst_hosts.clear();
         self
@@ -62,10 +60,8 @@ impl Filter {
     /// # Arguments
     ///
     /// * `src_host` - The ip address to add to the filter.
-    /// * `not` - If true, only packets that do not include the ip address as source will be captured.
-    ///
-    pub fn add_src_host(mut self, src_host: IpAddr, not: bool) -> Self {
-        self.src_hosts.insert(src_host, not);
+    pub fn add_src_host(mut self, src_host: IpAddr) -> Self {
+        self.src_hosts.insert(src_host);
         self.hosts.clear();
         self
     }
@@ -76,10 +72,8 @@ impl Filter {
     /// # Arguments
     ///
     /// * `dst_host` - The ip address to add to the filter.
-    /// * `not` - If true, only packets that do not include the ip address as source will be captured.
-    ///
-    pub fn add_dst_host(mut self, dst_host: IpAddr, not: bool) -> Self {
-        self.dst_hosts.insert(dst_host, not);
+    pub fn add_dst_host(mut self, dst_host: IpAddr) -> Self {
+        self.dst_hosts.insert(dst_host);
         self.hosts.clear();
         self
     }
@@ -163,79 +157,43 @@ impl fmt::Display for Filter {
         let mut output = "".to_owned();
         //IP ADDRESSES
         if !self.hosts.is_empty() {
-            output += "(";
-            output += self
+            let hosts_part = self
                 .hosts
-                .clone()
-                .into_iter()
-                .filter(|(_, not)| !*not)
-                .map(|(host, _)| format!("host {}", host))
+                .iter()
+                .map(|host| format!("host {}", host))
                 .collect::<Vec<String>>()
-                .join(" or ")
-                .as_str();
-            output += ") and (";
-            output += self
-                .hosts
-                .clone()
-                .into_iter()
-                .filter(|(_, not)| *not)
-                .map(|(host, _)| format!("not host {}", host))
-                .collect::<Vec<String>>()
-                .join(" or ")
-                .as_str();
-            output += ") and ";
+                .join(" or ");
+            output.push('(');
+            output.push_str(hosts_part.as_str());
+            output.push_str(") and ");
         } else {
             if !self.src_hosts.is_empty() {
-                output += "(";
-                output += self
+                let src_host_part = self
                     .src_hosts
-                    .clone()
-                    .into_iter()
-                    .filter(|(_, not)| !*not)
-                    .map(|(host, _)| format!("src host {}", host))
+                    .iter()
+                    .map(|host| format!("src host {}", host))
                     .collect::<Vec<String>>()
-                    .join(" or ")
-                    .as_str();
-                output += ") and (";
-                output += self
-                    .src_hosts
-                    .clone()
-                    .into_iter()
-                    .filter(|(_, not)| *not)
-                    .map(|(host, _)| format!("not src host {}", host))
-                    .collect::<Vec<String>>()
-                    .join(" or ")
-                    .as_str();
-                output += ") and ";
+                    .join(" or ");
+                output.push('(');
+                output.push_str(src_host_part.as_str());
+                output.push_str(") and ");
             }
             if !self.dst_hosts.is_empty() {
-                output += "(";
-                output += self
+                let dst_host_part = self
                     .dst_hosts
-                    .clone()
-                    .into_iter()
-                    .filter(|(_, not)| !*not)
-                    .map(|(host, _)| format!("dst host {}", host))
+                    .iter()
+                    .map(|host| format!("dst host {}", host))
                     .collect::<Vec<String>>()
-                    .join(" or ")
-                    .as_str();
-                output += ") and (";
-                output += self
-                    .dst_hosts
-                    .clone()
-                    .into_iter()
-                    .filter(|(_, not)| *not)
-                    .map(|(host, _)| format!("not dst host {}", host))
-                    .collect::<Vec<String>>()
-                    .join(" or ")
-                    .as_str();
-                output += ") and ";
+                    .join(" or ");
+                output.push('(');
+                output.push_str(dst_host_part.as_str());
+                output.push_str(") and ");
             }
         }
 
         //PORTS
         if !self.ports.is_empty() {
-            output += "( port ";
+            output += "(port ";
             output += self
                 .ports
                 .iter()
@@ -246,7 +204,7 @@ impl fmt::Display for Filter {
             output += ") and ";
         } else {
             if !self.src_ports.is_empty() {
-                output += "( src port ";
+                output += "(src port ";
                 output += self
                     .src_ports
                     .iter()
@@ -257,7 +215,7 @@ impl fmt::Display for Filter {
                 output += ") and ";
             }
             if !self.dst_ports.is_empty() {
-                output += "( dst port ";
+                output += "(dst port ";
                 output += self
                     .dst_ports
                     .iter()
@@ -270,7 +228,7 @@ impl fmt::Display for Filter {
         }
 
         if self.tcp && !self.udp {
-            output += "http and ";
+            output += "tcp and ";
         }
         if self.udp && !self.tcp {
             output += "udp and ";

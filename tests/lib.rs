@@ -61,17 +61,15 @@ fn filters() {
     let filter = Filter::new()
         .clear_dst_host()
         .clear_host()
-        .add_host(IpAddr::V4("192.168.1.1".parse().unwrap()), false)
-        .add_host(IpAddr::V4("192.168.1.2".parse().unwrap()), true)
-        .add_dst_host(IpAddr::V4("224.0.0.251".parse().unwrap()), false)
-        .add_dst_host(IpAddr::V4("224.0.0.252".parse().unwrap()), true)
-        .add_src_host(IpAddr::V4("192.168.1.164".parse().unwrap()), false)
-        .add_src_host(IpAddr::V4("192.168.1.165".parse().unwrap()), true)
+        .add_host(IpAddr::V4("192.168.1.1".parse().unwrap()))
+        .add_host(IpAddr::V4("192.168.1.2".parse().unwrap()))
+        .add_dst_host(IpAddr::V4("224.0.0.251".parse().unwrap()))
+        .add_dst_host(IpAddr::V4("224.0.0.252".parse().unwrap()))
+        .add_src_host(IpAddr::V4("192.168.1.164".parse().unwrap()))
+        .add_src_host(IpAddr::V4("192.168.1.165".parse().unwrap()))
         .add_port(80)
-        .add_dst_port(5353)
-        .add_dst_port(5354)
-        .add_src_port(5353)
-        .add_src_port(5354);
+        .add_port(443)
+        .set_tcp_only();
     println!("{}", filter);
     let mut naso = Nasoone::new();
     naso.set_capture_file("./tests/data/http.pcap").unwrap();

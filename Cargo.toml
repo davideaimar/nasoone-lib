@@ -1,7 +1,7 @@
 [package]
 name = "nasoone-lib"
 description = "A multithreading ibrary for collecting network traffic statistics"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "GPL-3.0-only"
 homepage = "https://github.com/davideaimar/nasoone-lib"
