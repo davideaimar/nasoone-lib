@@ -234,7 +234,9 @@ impl fmt::Display for Filter {
             output += "udp and ";
         }
 
-        let output = &output[0..output.len() - 5]; //Removes the trailing " and "
+        if output.len() > 5 {
+            output.truncate(output.len() - 5);
+        }
         write!(f, "{}", output)
     }
 }

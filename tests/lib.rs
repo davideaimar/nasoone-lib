@@ -77,6 +77,15 @@ fn filters() {
 }
 
 #[test]
+fn empty_filter() {
+    let filter = Filter::new();
+    println!("{}", filter);
+    let mut naso = Nasoone::new();
+    naso.set_capture_file("./tests/data/http.pcap").unwrap();
+    naso.set_filter(&filter).unwrap();
+}
+
+#[test]
 fn test_finished_state() {
     let _ = remove_file("./tests/output/test_finished");
     let mut naso = Nasoone::new();
