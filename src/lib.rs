@@ -194,6 +194,14 @@ impl NetworkInterface {
     fn new(name: String, desc: Option<String>) -> NetworkInterface {
         NetworkInterface { name, desc }
     }
+    /// Returns the name of the network interface.
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+    /// Returns the optional friendly description of the network interface.
+    pub fn get_desc(&self) -> Option<&str> {
+        self.desc.as_deref()
+    }
 }
 
 #[derive(Debug)]

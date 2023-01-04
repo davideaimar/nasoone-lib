@@ -41,6 +41,10 @@ fn list_devices() {
     assert!(devices.is_ok());
     let devices = devices.unwrap();
     assert!(!devices.is_empty());
+    for device in devices {
+        assert!(!device.get_name().is_empty());
+        let _ = device.get_desc();
+    }
     // println!("{:?}", devices);
 }
 
