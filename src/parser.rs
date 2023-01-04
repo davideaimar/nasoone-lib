@@ -3,12 +3,14 @@ use crossbeam_channel::{select, tick, Receiver, Sender};
 use etherparse::PacketHeaders;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub(crate) fn parser_task(
     rx_prod_parser: Receiver<PacketData>,
     tx_parser_writer: Sender<HashMap<ReportKey, ReportValue>>,
     timeout_s: u32,
+    total_packets: Arc<Mutex<usize>>,
 ) {
     // the ticker will send a message every `timeout` seconds
     // it is used to send the intermediate data to the writer thread with a frequency 4 times higher
@@ -55,6 +57,7 @@ pub(crate) fn parser_task(
                                 info.last_timestamp_ms = info.last_timestamp_ms.max(ts);
                                 info.first_timestamp_ms = info.first_timestamp_ms.min(ts);
                                 info.packets_count += 1;
+                                *total_packets.lock().unwrap() += 1;
                             }
                         }
                     }

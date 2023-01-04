@@ -12,7 +12,7 @@ fn it_compiles() {
     //naso.set_filter("ip host 192.168.1.1").unwrap();
     naso.start().unwrap();
     assert!(Nasoone::list_devices().is_ok());
-    //remove_file("./tests/output/test1").unwrap();
+    let _ = remove_file("./tests/output/test1");
 }
 
 #[test]
@@ -32,7 +32,7 @@ fn output_paths() {
     // should fail because capture has already been started
     assert!(naso.set_output("./tests/output/test3").is_err());
 
-    remove_file("./tests/output/test2").unwrap();
+    let _ = remove_file("./tests/output/test2");
 }
 
 #[test]
@@ -144,15 +144,18 @@ fn test_pause_stop() {
 fn test_total_packets_with_interface() {
     let _ = remove_file("./tests/output/test_total_packets_with_interface");
     let mut naso = Nasoone::new();
-    naso.set_capture_device("en3").unwrap();
+    naso.set_capture_device("en0").unwrap();
     naso.set_output("./tests/output/test_total_packets_with_interface")
         .unwrap();
     naso.start().unwrap();
+    let mut packets = 0;
     for _ in 0..10 {
         sleep(Duration::from_secs(1));
-        println!("{} packets", naso.get_total_packets());
+        packets = naso.get_total_packets();
+        println!("{} packets", packets);
     }
-    let _ = naso.stop().unwrap();
+    let stats = naso.stop().unwrap().unwrap();
+    assert!(stats.received as usize >= packets);
     remove_file("./tests/output/test_total_packets_with_interface").unwrap();
 }
 
@@ -167,7 +170,7 @@ fn test_total_packets_with_file() {
     naso.start().unwrap();
     sleep(Duration::from_secs(1));
     let _ = naso.stop().unwrap();
-    assert!(naso.get_total_packets() > 0);
+    assert_eq!(naso.get_total_packets(), 43);
     remove_file("./tests/output/test_total_packets_with_file").unwrap();
 }
 
@@ -252,6 +255,7 @@ fn test_pcap_file_1() {
         .unwrap();
     naso.set_output("./tests/output/test8").unwrap();
     naso.start().unwrap();
+    let _ = remove_file("./tests/output/test8");
 }
 
 #[test]
@@ -261,4 +265,5 @@ fn test_pcap_file_2() {
         .unwrap();
     naso.set_output("./tests/output/test9").unwrap();
     naso.start().unwrap();
+    let _ = remove_file("./tests/output/test9");
 }

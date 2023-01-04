@@ -1,7 +1,6 @@
 use crate::{Command, NasooneCapture, PacketData};
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use pcap::{Error, Stat};
-use std::sync::{Arc, Mutex};
 
 // The producer thread. Its task is to receive packets from pcap, clone the data and send it to a
 // parser thread that is available. At every packet received, the producer also check the state:
@@ -13,13 +12,10 @@ pub(crate) fn producer_task(
     mut capture: NasooneCapture,
     tx_prod_parser: Sender<PacketData>,
     rx_main_prod: Receiver<Command>,
-    total_packets: Arc<Mutex<usize>>,
 ) -> Result<Stat, Error> {
     let mut ignore_packets = false;
 
     let from_file = matches!(capture, NasooneCapture::FromFile(_));
-
-    let mut packet_cnt: usize = 0;
 
     loop {
         // after every packet received, check if there is a command from the main thread
@@ -73,11 +69,6 @@ pub(crate) fn producer_task(
         }
 
         if !ignore_packets {
-            packet_cnt += 1;
-            // update the total packets counter every 10 packets
-            if packet_cnt % 10 == 0 {
-                *total_packets.lock().unwrap() = packet_cnt;
-            }
             let packet = next_packet.unwrap();
             // tv_sec is time in sec, tv_usec is time in microsecond. Result is in millisecond.
             let timestamp_ms =

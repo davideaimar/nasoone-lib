@@ -562,9 +562,8 @@ impl Nasoone {
 
                 let capture = self.capture.take().unwrap();
                 self.tx_main_prod = Some(tx_main_prod);
-                let total_packets = self.total_packets.clone();
                 self.producer_handle = Some(thread::spawn(move || {
-                    producer_task(capture, tx_prod_parser, rx_main_prod, total_packets)
+                    producer_task(capture, tx_prod_parser, rx_main_prod)
                 }));
 
                 let num_cpus = num_cpus::get();
@@ -573,8 +572,9 @@ impl Nasoone {
                     let rx_prod_parser = rx_prod_parser.clone();
                     let tx_parser_writer = tx_parser_writer.clone();
                     let timeout = self.timeout;
+                    let total_packets = self.total_packets.clone();
                     self.parser_handles.push(thread::spawn(move || {
-                        parser_task(rx_prod_parser, tx_parser_writer, timeout)
+                        parser_task(rx_prod_parser, tx_parser_writer, timeout, total_packets)
                     }));
                 }
 
