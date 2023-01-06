@@ -49,7 +49,7 @@ use crate::parser::parser_task;
 use crate::producer::producer_task;
 use crate::writer::writer_task;
 use crossbeam_channel::Sender;
-use pcap::{Active, Capture, Device, Offline, Stat};
+use pcap::{Active, Capture, Device, Offline, Stat, Inactive};
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
@@ -157,6 +157,14 @@ impl From<Stat> for NasooneStats {
     }
 }
 
+/// Abstraction of capture types before starting
+enum InactiveNasooneCapture {
+    /// The capture is performed on a pcap file.
+    FromFile(Capture<Offline>),
+    /// The capture is performed on a live network interface.
+    FromDevice(Capture<Inactive>),
+}
+
 /// Abstraction of the pcap capture.
 enum NasooneCapture {
     /// The capture is performed on a pcap file.
@@ -255,7 +263,9 @@ pub struct Nasoone {
     /// The periodical timeout after which the output file is updated.
     timeout: u32,
     /// The pcap capture.
-    capture: Option<NasooneCapture>,
+    capture: Option<InactiveNasooneCapture>,
+    /// The temprorary store for the BPF filter string
+    filter: String,
     /// The path to the output file.
     output: Option<File>,
     /// Producer thread handle.
@@ -276,6 +286,7 @@ impl Nasoone {
             timeout: 1,
             capture: None,
             output: None,
+            filter: String::new(),
             producer_handle: None,
             parser_handles: Vec::new(),
             writer_handle: None,
@@ -305,13 +316,7 @@ impl Nasoone {
         match self.state {
             NasooneState::Initial => {
                 let capture = Capture::from_device(device).map_err(NasooneError::PcapError)?;
-                let capture = capture
-                    .promisc(true)
-                    .immediate_mode(true)
-                    .timeout(200)
-                    .open()
-                    .map_err(NasooneError::PcapError)?;
-                self.capture = Some(NasooneCapture::FromDevice(capture));
+                self.capture = Some(InactiveNasooneCapture::FromDevice(capture));
                 Ok(())
             }
             _ => Err(NasooneError::InvalidState(
@@ -342,7 +347,7 @@ impl Nasoone {
         match self.state {
             NasooneState::Initial => {
                 let capture = Capture::from_file(file).map_err(NasooneError::PcapError)?;
-                self.capture = Some(NasooneCapture::FromFile(capture));
+                self.capture = Some(InactiveNasooneCapture::FromFile(capture));
                 Ok(())
             }
             _ => Err(NasooneError::InvalidState(
@@ -411,24 +416,13 @@ impl Nasoone {
     /// ```
     pub fn set_raw_filter(&mut self, filter: &str) -> Result<(), NasooneError> {
         match self.state {
-            NasooneState::Initial => match self.capture {
-                Some(NasooneCapture::FromDevice(ref mut capture)) => {
-                    capture
-                        .filter(filter, true)
-                        .map_err(NasooneError::PcapError)?;
-                    Ok(())
-                }
-                Some(NasooneCapture::FromFile(ref mut capture)) => {
-                    capture
-                        .filter(filter, true)
-                        .map_err(NasooneError::PcapError)?;
-                    Ok(())
-                }
-                None => Err(NasooneError::UnsetCapture),
+            NasooneState::Initial => {
+                self.filter = filter.to_string();
+                Ok(())
             },
             _ => Err(NasooneError::InvalidState(
                 "Filters can be set only in initial state".to_string(),
-            )),
+            ))
         }
     }
     /// Set the filter for the capture.
@@ -445,31 +439,19 @@ impl Nasoone {
     ///
     /// # Examples
     ///
-    /// create a nasoone instance and set filter to accept only packets with source port 80 to 88:
+    /// create a nasoone instance and set filter to accept only tcp traffic
     /// ```
-    /// use nasoone_lib::Nasoone;
-    /// use nasoone_lib::Filter;
-    /// let filter = Filter::new();
+    /// use nasoone_lib::{Nasoone, Filter};
+    /// let filter = Filter::new().set_tcp_only();
     /// let mut nasoone = Nasoone::new();
-    /// nasoone.set_capture_device("en0").expect("");
-    /// nasoone.set_filter("src portrange 80-88").expect("");
+    /// nasoone.set_capture_device("en0").unwrap();
+    /// nasoone.set_filter(&filter).unwrap();
     /// ```
     pub fn set_filter(&mut self, filter: &Filter) -> Result<(), NasooneError> {
         match self.state {
-            NasooneState::Initial => match self.capture {
-                Some(NasooneCapture::FromDevice(ref mut capture)) => {
-                    capture
-                        .filter(&filter.to_string(), true)
-                        .map_err(NasooneError::PcapError)?;
-                    Ok(())
-                }
-                Some(NasooneCapture::FromFile(ref mut capture)) => {
-                    capture
-                        .filter(&filter.to_string(), true)
-                        .map_err(NasooneError::PcapError)?;
-                    Ok(())
-                }
-                None => Err(NasooneError::UnsetCapture),
+            NasooneState::Initial => {
+                self.filter = filter.to_string();
+                Ok(())
             },
             _ => Err(NasooneError::InvalidState(
                 "Filters can be set only in initial state".to_string(),
@@ -560,7 +542,28 @@ impl Nasoone {
                 let (tx_prod_parser, rx_prod_parser) = crossbeam_channel::unbounded();
                 let (tx_parser_writer, rx_parser_writer) = crossbeam_channel::unbounded();
 
-                let capture = self.capture.take().unwrap();
+                let capture = match self.capture.take().unwrap() {
+                    InactiveNasooneCapture::FromFile(mut c) => {
+                        if !self.filter.is_empty() {
+                            c.filter(self.filter.as_str(), true)
+                            .map_err(NasooneError::PcapError)?;
+                        }
+                        NasooneCapture::FromFile(c)
+                    },
+                    InactiveNasooneCapture::FromDevice(c) => {
+                        let mut activated_c = c.promisc(true)
+                        .immediate_mode(true)
+                        .timeout(0)
+                        .open()
+                        .map_err(NasooneError::PcapError)?;
+                        if !self.filter.is_empty() {
+                            activated_c
+                            .filter(&self.filter, true)
+                            .map_err(NasooneError::PcapError)?;
+                        }
+                        NasooneCapture::FromDevice(activated_c)
+                    }
+                };
                 self.tx_main_prod = Some(tx_main_prod);
                 self.producer_handle = Some(thread::spawn(move || {
                     producer_task(capture, tx_prod_parser, rx_main_prod)
@@ -687,8 +690,11 @@ impl Nasoone {
         match self.state {
             NasooneState::Running | NasooneState::Paused | NasooneState::Finished => {
                 self.state = NasooneState::Stopped;
+                println!("sending stop command");
                 let _ = self.tx_main_prod.as_ref().unwrap().send(Command::Stop); // ignore a possible error that would mean that the producer thread is already stopped
+                println!("stop command sent");
                 let stat = self.producer_handle.take().unwrap().join().unwrap();
+                println!("producer stopped");
                 for handle in self.parser_handles.drain(..) {
                     handle.join().unwrap();
                 }
@@ -747,7 +753,9 @@ impl Nasoone {
         self.state.clone()
     }
 
-    /// Get the list of available network interfaces.
+    /// Get the list of available network interfaces. 
+    /// It only returns interfaces that have a network address, 
+    /// since the others can't receive any network packet.
     ///
     /// It could return underlined errors from the pcap library.
     ///
@@ -760,6 +768,7 @@ impl Nasoone {
         let devices = Device::list()
             .map_err(NasooneError::PcapError)?
             .into_iter()
+            .filter(|d| !d.addresses.is_empty())
             .map(|d| NetworkInterface::new(d.name, d.desc))
             .collect();
         Ok(devices)

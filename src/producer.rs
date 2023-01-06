@@ -49,8 +49,9 @@ pub(crate) fn producer_task(
 
         // receive next packet (blocking), could exit after a timeout if no packet is received
         // or if no packet satisfies the filter. The timeout is set when the capture is built (200ms).
+        // NOT WORKING: on ubuntu the timeout doesn't work if the interface doesn't receive any packet
+        // so it will wait undefinitely on unused interfaces.
         let next_packet = capture.next();
-
         if next_packet.is_err() {
             match next_packet.err().unwrap() {
                 Error::TimeoutExpired => {
