@@ -239,11 +239,8 @@ fn test_stop_duration() {
     let stats = naso.stop().unwrap();
     let duration = start.elapsed();
     println!("Duration of stop function: {:?}", duration);
-    match stats {
-        Some(stats) => {
-            println!("{:?}", stats);
-        }
-        None => {}
+    if let Some(stats) = stats {
+        println!("{:?}", stats);
     }
     let _ = remove_file("./tests/output/test7");
 }

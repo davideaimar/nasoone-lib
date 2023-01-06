@@ -49,7 +49,7 @@ use crate::parser::parser_task;
 use crate::producer::producer_task;
 use crate::writer::writer_task;
 use crossbeam_channel::Sender;
-use pcap::{Active, Capture, Device, Offline, Stat, Inactive};
+use pcap::{Active, Capture, Device, Inactive, Offline, Stat};
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
@@ -419,10 +419,10 @@ impl Nasoone {
             NasooneState::Initial => {
                 self.filter = filter.to_string();
                 Ok(())
-            },
+            }
             _ => Err(NasooneError::InvalidState(
                 "Filters can be set only in initial state".to_string(),
-            ))
+            )),
         }
     }
     /// Set the filter for the capture.
@@ -452,7 +452,7 @@ impl Nasoone {
             NasooneState::Initial => {
                 self.filter = filter.to_string();
                 Ok(())
-            },
+            }
             _ => Err(NasooneError::InvalidState(
                 "Filters can be set only in initial state".to_string(),
             )),
@@ -546,20 +546,21 @@ impl Nasoone {
                     InactiveNasooneCapture::FromFile(mut c) => {
                         if !self.filter.is_empty() {
                             c.filter(self.filter.as_str(), true)
-                            .map_err(NasooneError::PcapError)?;
+                                .map_err(NasooneError::PcapError)?;
                         }
                         NasooneCapture::FromFile(c)
-                    },
+                    }
                     InactiveNasooneCapture::FromDevice(c) => {
-                        let mut activated_c = c.promisc(true)
-                        .immediate_mode(true)
-                        .timeout(0)
-                        .open()
-                        .map_err(NasooneError::PcapError)?;
+                        let mut activated_c = c
+                            .promisc(true)
+                            .immediate_mode(true)
+                            .timeout(0)
+                            .open()
+                            .map_err(NasooneError::PcapError)?;
                         if !self.filter.is_empty() {
                             activated_c
-                            .filter(&self.filter, true)
-                            .map_err(NasooneError::PcapError)?;
+                                .filter(&self.filter, true)
+                                .map_err(NasooneError::PcapError)?;
                         }
                         NasooneCapture::FromDevice(activated_c)
                     }
@@ -753,8 +754,8 @@ impl Nasoone {
         self.state.clone()
     }
 
-    /// Get the list of available network interfaces. 
-    /// It only returns interfaces that have a network address, 
+    /// Get the list of available network interfaces.
+    /// It only returns interfaces that have a network address,
     /// since the others can't receive any network packet.
     ///
     /// It could return underlined errors from the pcap library.
