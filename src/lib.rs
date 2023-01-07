@@ -554,13 +554,17 @@ impl Nasoone {
                         let mut activated_c = c
                             .promisc(true)
                             .immediate_mode(true)
-                            .timeout(0)
+                            .timeout(200)
                             .open()
                             .map_err(NasooneError::PcapError)?;
                         if !self.filter.is_empty() {
                             activated_c
                                 .filter(&self.filter, true)
                                 .map_err(NasooneError::PcapError)?;
+                        }
+                        if cfg!(target_os = "linux") {
+                            activated_c =
+                                activated_c.setnonblock().map_err(NasooneError::PcapError)?;
                         }
                         NasooneCapture::FromDevice(activated_c)
                     }
