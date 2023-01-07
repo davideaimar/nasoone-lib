@@ -144,7 +144,8 @@ fn test_pause_stop() {
 fn test_total_packets_with_interface() {
     let _ = remove_file("./tests/output/test_total_packets_with_interface");
     let mut naso = Nasoone::new();
-    naso.set_capture_device("en0").unwrap();
+    naso.set_capture_device(Nasoone::get_default_device_name().unwrap().as_str())
+        .unwrap();
     naso.set_output("./tests/output/test_total_packets_with_interface")
         .unwrap();
     naso.start().unwrap();

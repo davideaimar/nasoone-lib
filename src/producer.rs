@@ -1,3 +1,8 @@
+#[cfg(target_os = "linux")]
+use std::thread;
+#[cfg(target_os = "linux")]
+use std::time::Duration;
+
 use crate::{Command, NasooneCapture, PacketData};
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use pcap::{Error, Stat};
@@ -14,7 +19,6 @@ pub(crate) fn producer_task(
     rx_main_prod: Receiver<Command>,
 ) -> Result<Stat, Error> {
     let mut ignore_packets = false;
-
     let from_file = matches!(capture, NasooneCapture::FromFile(_));
 
     loop {
@@ -49,9 +53,16 @@ pub(crate) fn producer_task(
 
         // receive next packet (blocking), could exit after a timeout if no packet is received
         // or if no packet satisfies the filter. The timeout is set when the capture is built (200ms).
-        // NOT WORKING: on ubuntu the timeout doesn't work if the interface doesn't receive any packet
-        // so it will wait undefinitely on unused interfaces.
-        let next_packet = capture.next();
+        let mut next_packet = capture.next();
+
+        if !from_file && next_packet.is_err() && cfg!(target_os = "linux") {
+            // Fix for Linux since the timeout doesn't work if the interface doesn't receive any packet
+            // so it would wait undefinitely on unused interfaces.
+            // Switched to a polling, could probably be improved with Tokio
+            thread::sleep(Duration::from_millis(10));
+            next_packet = next_packet.map_err(|_| Error::TimeoutExpired);
+        }
+
         if next_packet.is_err() {
             match next_packet.err().unwrap() {
                 Error::TimeoutExpired => {

@@ -9,6 +9,6 @@ filenames=$(cargo test --no-run --message-format=json | jq -r "select(.profile.t
 for file in $filenames
 do
   sudo setcap cap_net_raw,cap_net_admin=eip $file
-  $file --ignored
+  $file --include-ignored
 done
 
