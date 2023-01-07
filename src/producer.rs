@@ -1,6 +1,4 @@
-#[cfg(target_os = "linux")]
 use std::thread;
-#[cfg(target_os = "linux")]
 use std::time::Duration;
 
 use crate::{Command, NasooneCapture, PacketData};
